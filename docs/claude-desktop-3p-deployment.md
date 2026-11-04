@@ -254,6 +254,20 @@ Set these as Worker secrets:
 | `LITELLM_ADMIN_KEY` | LiteLLM proxy-admin key (can create users and keys) |
 | `POSTMARK_*` | Postmark credentials and sender settings used by the auth flow |
 
+### Rotating `BETTER_AUTH_SECRET`
+
+The Worker refuses to start with an empty, short (< 32 chars) or Better Auth default secret.
+Rotation signs every browser user out; Claude Desktop device tokens keep working.
+
+1. `wrangler versions upload`, then `wrangler versions secret put BETTER_AUTH_SECRET` (creates a new version).
+   Set `BETTER_AUTH_SECRET_PREVIOUS` to the old value only if the old value was a real secret, so encrypted data stays readable.
+2. `wrangler versions deploy <new-version>@100%` and wait until `wrangler deployments status` shows only the new version.
+3. Only then delete the JWT signing keys if they were encrypted with an unrecoverable secret:
+   `wrangler d1 execute evolve-ai-bootstrap-dev --remote --command 'DELETE FROM "jwks";'`.
+   Deleting earlier lets an old instance regenerate a key with the old secret, and every
+   `get-session` then fails with "Failed to decrypt private key".
+4. Check `curl https://api.auth-dev.vortex.so/api/auth/jwks`, then sign in and call `/api/auth/get-session`.
+
 ### Migrate and deploy
 
 Apply remote D1 migrations before deploying code that depends on them:
