@@ -1,62 +1,31 @@
-import type { BootstrapConfig } from "@vortex/schema";
-import { z } from "zod";
+import { consentRequiredPaths, validateBootstrapConfig } from "@vortex/schema";
 
-const inferenceModelSchema = z.union([
-  z.string().min(1),
-  z.object({
-    name: z.string().min(1),
-    labelOverride: z.string().optional(),
-    supports1m: z.boolean().optional(),
-    prefer1m: z.boolean().optional(),
-    anthropicFamilyTier: z
-      .enum(["sonnet", "opus", "haiku", "fable", "mythos"])
-      .optional(),
-    isFamilyDefault: z.boolean().optional(),
-  }),
-]);
-
-const managedMcpServerSchema = z.object({
-  name: z.string().min(1),
-  url: z.string().url().optional(),
-  transport: z.enum(["sse", "http", "stdio"]).optional(),
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-});
-
-export const bootstrapConfigHintSchema = z
-  .object({
-    $schema: z.string().optional(),
-    inferenceProvider: z.enum([
-      "gateway",
-      "anthropic",
-      "bedrock",
-      "vertex",
-      "foundry",
-    ]),
-    inferenceGatewayBaseUrl: z.string().url().optional(),
-    inferenceGatewayAuthScheme: z.enum(["bearer", "x-api-key"]).optional(),
-    inferenceCredentialKind: z
-      .enum(["static", "interactive", "oauth", "workforce"])
-      .optional(),
-    inferenceModels: z.array(inferenceModelSchema).min(1).optional(),
-    coworkEgressAllowedHosts: z.array(z.string().min(1)).optional(),
-    managedMcpServers: z.array(managedMcpServerSchema).optional(),
-    otlpResourceAttributes: z.record(z.string(), z.string()).optional(),
-    expiresAt: z.number().int().positive().optional(),
-  })
-  .strict();
-
-const _assignable: z.infer<typeof bootstrapConfigHintSchema> = null as unknown as BootstrapConfig;
-void _assignable;
-
-export function validateBootstrapConfigHint(input: unknown): Array<{ path: string; message: string }> {
-  const parsed = bootstrapConfigHintSchema.safeParse(input);
-  if (parsed.success) {
+/**
+ * Client-side hint validation. This is only a hint: the authoritative check is
+ * the server-side `validateBootstrapConfig` call in the admin BFF. We delegate
+ * to the exact same shared validator here so the editor and the server agree on
+ * which keys are official.
+ */
+export function validateBootstrapConfigHint(
+  input: unknown,
+): Array<{ path: string; message: string }> {
+  const result = validateBootstrapConfig(input);
+  if (result.ok) {
     return [];
   }
 
-  return parsed.error.issues.map((issue) => ({
-    path: issue.path.join("."),
-    message: issue.message,
-  }));
+  return result.errors;
+}
+
+/**
+ * Paths whose values trigger Claude Desktop's "Apply settings from your
+ * organization?" consent dialog, derived from `x-consentRequired` in the
+ * official schema. Returns [] for anything that is not a plain config object.
+ */
+export function consentRequiredKeys(input: unknown): string[] {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return [];
+  }
+
+  return consentRequiredPaths(input);
 }

@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { Alert, AlertDescription } from "@vortex/ui/components/alert";
+import { Alert, AlertDescription, AlertTitle } from "@vortex/ui/components/alert";
 import { Button } from "@vortex/ui/components/button";
 import { Input } from "@vortex/ui/components/input";
 import {
@@ -18,7 +18,10 @@ import {
 import { Switch } from "@vortex/ui/components/switch";
 import { Textarea } from "@vortex/ui/components/textarea";
 
-import { validateBootstrapConfigHint } from "./bootstrap-config-hint-schema";
+import {
+  consentRequiredKeys,
+  validateBootstrapConfigHint,
+} from "./bootstrap-config-hint-schema";
 import type { BootstrapProfileRecord } from "./bootstrap-profiles-table";
 
 type BootstrapProfileEditorProps = {
@@ -79,6 +82,16 @@ export function BootstrapProfileEditor({
       return existingName.trim().toLowerCase() === normalizedName;
     });
   }, [existingNames, name, profile]);
+
+  const consentPaths = useMemo(() => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(config);
+    } catch {
+      return [];
+    }
+    return consentRequiredKeys(parsed);
+  }, [config]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -280,6 +293,31 @@ export function BootstrapProfileEditor({
                     </p>
                   ))}
                 </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          {consentPaths.length > 0 ? (
+            <Alert>
+              <AlertTitle>Users will be asked to approve these settings</AlertTitle>
+              <AlertDescription>
+                <p>
+                  Claude Desktop shows an approval dialog the first time it receives these
+                  values, and again when they change, unless the bootstrap URL was deployed by
+                  device management or trustBootstrapDelivery is set.
+                </p>
+                <ul className="grid gap-1">
+                  {consentPaths.map((path) => (
+                    <li key={path} className="font-mono text-xs">
+                      {path}
+                    </li>
+                  ))}
+                </ul>
+                {consentPaths.includes("inferenceGatewayBaseUrl") ? (
+                  <p className="text-xs text-muted-foreground">
+                    inferenceGatewayBaseUrl is always set by the server.
+                  </p>
+                ) : null}
               </AlertDescription>
             </Alert>
           ) : null}
