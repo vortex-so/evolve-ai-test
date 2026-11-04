@@ -103,8 +103,9 @@ Non-secret values live in `apps/auth-server/wrangler.jsonc`:
 
 Worker secrets:
 
-- `BETTER_AUTH_SECRET`
-- `LITELLM_ADMIN_KEY`, a LiteLLM proxy-admin management key
+- `BETTER_AUTH_SECRET` (non-empty, 32+ random characters)
+- `LITELLM_KEY_ENCRYPTION_SECRET`, encrypts stored per-user LiteLLM keys
+- `LITELLM_ADMIN_KEY`, a LiteLLM proxy-admin key
 - `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM`
 
 The Worker also requires the configured D1 `DB` and KV `AUTH_KV` bindings.

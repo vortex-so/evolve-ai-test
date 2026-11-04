@@ -80,8 +80,11 @@ On a user's first inference request, the Worker:
 4. Stores the key encrypted in D1 table `litellm_user_key`.
 5. Forwards inference requests to LiteLLM with that key.
 
-The stored key uses AES-256-GCM. Its encryption key is derived from
-`BETTER_AUTH_SECRET` with HKDF. The LiteLLM key never reaches Claude Desktop.
+The stored key uses AES-256-GCM. Its encryption key is derived with HKDF from
+`LITELLM_KEY_ENCRYPTION_SECRET` (falls back to `BETTER_AUTH_SECRET` when unset).
+The LiteLLM key never reaches Claude Desktop. If the encryption secret changes,
+stored keys can no longer be decrypted; the server then deletes them in LiteLLM
+and provisions new ones on the next request.
 
 Generated keys have no budget or model limits. Set per-user budgets and model
 limits in the LiteLLM UI. Deleting a user through the Vortex console deletes
@@ -246,8 +249,9 @@ Set these as Worker secrets:
 
 | Secret | Purpose |
 | --- | --- |
-| `BETTER_AUTH_SECRET` | Better Auth signing secret and input key material for LiteLLM-key encryption |
-| `LITELLM_ADMIN_KEY` | LiteLLM key whose `key_type` is `management` |
+| `BETTER_AUTH_SECRET` | Better Auth signing secret (must be non-empty, 32+ random characters) |
+| `LITELLM_KEY_ENCRYPTION_SECRET` | Input key material for encrypting stored per-user LiteLLM keys (32+ random characters) |
+| `LITELLM_ADMIN_KEY` | LiteLLM proxy-admin key (can create users and keys) |
 | `POSTMARK_*` | Postmark credentials and sender settings used by the auth flow |
 
 ### Migrate and deploy
