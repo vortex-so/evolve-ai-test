@@ -5,9 +5,9 @@ export const AUTH_ORIGIN =
 export const AUTH_API_ORIGIN =
   process.env.PLAYWRIGHT_AUTH_API_ORIGIN ?? "https://api.auth-dev.vortex.so";
 
-export const ADMIN_EMAIL = "p3-1785649016@evolveai.dev";
+export const ADMIN_EMAIL = "solution+e2e-admin@vortex.so";
 export const ADMIN_PASSWORD = "password12345";
-export const NON_ADMIN_EMAIL = "non-admin-e2e@evolveai.dev";
+export const NON_ADMIN_EMAIL = "solution+e2e-non-admin@vortex.so";
 export const NON_ADMIN_PASSWORD = "password12345";
 export const DEFAULT_PASSWORD = "password12345";
 

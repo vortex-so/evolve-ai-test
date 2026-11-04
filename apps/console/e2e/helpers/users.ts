@@ -10,7 +10,7 @@ import {
 import { signUpViaApi } from "./auth";
 
 export function uniqueEmail(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@evolveai.dev`;
+  return `solution+${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@vortex.so`;
 }
 
 export async function createVerifiedUser(
