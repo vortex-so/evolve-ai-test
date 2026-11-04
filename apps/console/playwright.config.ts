@@ -7,6 +7,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONSOLE_ORIGIN =
   process.env.PLAYWRIGHT_CONSOLE_ORIGIN ?? "https://console.auth-dev.vortex.so";
 
+// Opt in when local DNS routes Chromium to an unreachable edge. The value is
+// passed verbatim to Chromium's --host-resolver-rules flag.
+const HOST_RESOLVER_RULES = process.env.PLAYWRIGHT_HOST_RESOLVER_RULES;
+
 export const ADMIN_STATE = path.join(__dirname, "e2e", ".auth", "admin.json");
 
 export default defineConfig({
@@ -31,7 +35,16 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(HOST_RESOLVER_RULES
+          ? {
+              launchOptions: {
+                args: [`--host-resolver-rules=${HOST_RESOLVER_RULES}`],
+              },
+            }
+          : {}),
+      },
     },
   ],
 });

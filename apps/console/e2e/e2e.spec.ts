@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { signInViaApi } from "./helpers";
 
 const AUTH_ORIGIN = "https://auth.auth-dev.vortex.so";
 const CONSOLE_ORIGIN =
@@ -26,10 +27,10 @@ async function signInThroughUI(
   );
   await page.getByRole("button", { name: /^sign in$/i }).click();
   const response = await signInResponse;
-  expect(
-    response.ok(),
-    `sign-in: ${response.status()} ${await response.text()}`,
-  ).toBe(true);
+  if (!response.ok()) {
+    throw new Error(`sign-in: ${response.status()} ${await response.text()}`);
+  }
+  expect(response.ok()).toBe(true);
 }
 
 test.describe("Vortex admin console — auth + admin guard", () => {
@@ -105,13 +106,9 @@ test.describe("Vortex admin console — auth + admin guard", () => {
   test("sign-out clears the session cookie across .auth-dev.vortex.so", async ({
     page,
   }) => {
+    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
-    await page.waitForURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
-    await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.waitForURL(
-      (url) => url.origin === CONSOLE_ORIGIN && url.pathname === "/dashboard",
-      { timeout: 45_000 },
-    );
+    await expect(page).toHaveURL(`${CONSOLE_ORIGIN}/dashboard`);
 
     const beforeSession = await page.request
       .get(`${AUTH_API_ORIGIN}/api/auth/get-session`, {
@@ -168,14 +165,19 @@ test.describe("Vortex admin console — auth + admin guard", () => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await expect(page).not.toHaveURL(`${CONSOLE_ORIGIN}/dashboard`);
   });
+});
+
+test.describe("Vortex admin console — auth + admin guard", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test("admin sign-in → nav to console.auth-dev directly → session preserved (cross-subdomain cookie)", async ({
     page,
   }) => {
     await page.goto(`${AUTH_ORIGIN}/auth/sign-in`);
     await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.waitForURL((url) => url.pathname === "/" || url.pathname.startsWith("/dashboard"));
-
+    await page.waitForURL(
+      (url) => url.pathname === "/" || url.pathname.startsWith("/dashboard"),
+    );
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await expect(page).toHaveURL(`${CONSOLE_ORIGIN}/dashboard`);
     await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();

@@ -1,10 +1,11 @@
 import { expect, type APIRequestContext, type BrowserContext } from "@playwright/test";
-import { DEFAULT_PASSWORD } from "./constants";
+import { CONSOLE_ORIGIN, DEFAULT_PASSWORD } from "./constants";
 import {
   deleteUserByEmail,
   demoteToUser,
   markUserVerified,
   promoteToAdmin,
+  selectUser,
 } from "./d1";
 import { signUpViaApi } from "./auth";
 
@@ -21,14 +22,31 @@ export async function createVerifiedUser(
     password?: string;
     name?: string;
   },
+  adminRequest?: APIRequestContext,
 ): Promise<{ email: string; password: string; id: string }> {
   const email = uniqueEmail(input.prefix);
   const password = input.password ?? DEFAULT_PASSWORD;
-  const { id } = await signUpViaApi(context, {
-    email,
-    password,
-    name: input.name ?? "E2E User",
-  });
+  const name = input.name ?? "E2E User";
+  let id: string;
+
+  if (adminRequest) {
+    const response = await adminRequest.post(`${CONSOLE_ORIGIN}/api/admin/users`, {
+      headers: { Origin: CONSOLE_ORIGIN },
+      data: { email, password, name, role: input.role ?? "user" },
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `admin user creation failed for ${email}: ${response.status()} ${await response.text()}`,
+      );
+    }
+    const created = await selectUser(request, email);
+    if (typeof created?.id !== "string") {
+      throw new Error(`admin user creation did not persist ${email}`);
+    }
+    id = created.id;
+  } else {
+    ({ id } = await signUpViaApi(context, { email, password, name }));
+  }
   await markUserVerified(request, email);
   if (input.role === "admin") {
     await promoteToAdmin(request, email);
@@ -40,9 +58,7 @@ export async function cleanupUser(
   request: APIRequestContext,
   email: string,
 ): Promise<void> {
-  try {
-    await deleteUserByEmail(request, email);
-  } catch {}
+  await deleteUserByEmail(request, email);
 }
 
 export async function resetUserRoleToUser(

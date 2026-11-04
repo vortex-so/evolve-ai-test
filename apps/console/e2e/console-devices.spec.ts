@@ -1,31 +1,35 @@
 import { expect, test } from "@playwright/test";
 import {
-  AUTH_API_ORIGIN,
-  AUTH_ORIGIN,
   CONSOLE_ORIGIN,
   d1Exec,
+  seedDeviceCode,
 } from "./helpers";
 
 async function seedPendingDevice(request: import("@playwright/test").APIRequestContext) {
-  const res = await request.post(`${AUTH_API_ORIGIN}/oauth/device`, {
-    headers: {
-      Origin: AUTH_ORIGIN,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    form: {
-      client_id: "claude-desktop",
-      scope: "openid offline_access bootstrap:read",
-    },
+  const now = Date.now();
+  const userCode = Math.random().toString(36).slice(2, 10).toUpperCase();
+  await seedDeviceCode(request, {
+    id: crypto.randomUUID(),
+    deviceCode: crypto.randomUUID(),
+    userCode,
+    clientId: "claude-desktop",
+    createdAtMs: now,
+    expiresAtMs: now + 10 * 60_000,
   });
-  if (!res.ok()) {
-    throw new Error(`seed device failed: ${res.status()} ${await res.text()}`);
+  return { user_code: userCode };
+}
+
+async function findDeviceRow(page: import("@playwright/test").Page, userCode: string) {
+  for (let pageIndex = 0; pageIndex < 20; pageIndex++) {
+    const row = page.locator("tr", { hasText: userCode }).first();
+    if (await row.isVisible()) return row;
+
+    const next = page.getByRole("link", { name: /go to next page/i });
+    if ((await next.getAttribute("aria-disabled")) === "true") break;
+    await next.click();
+    await page.waitForTimeout(500);
   }
-  return (await res.json()) as {
-    device_code: string;
-    user_code: string;
-    verification_uri: string;
-    expires_in: number;
-  };
+  return page.locator("tr", { hasText: userCode }).first();
 }
 
 test.describe("console /devices", () => {
@@ -55,31 +59,38 @@ test.describe("console /devices", () => {
 
   test("force-expire flips a pending device to expired in D1", async ({ page, request }) => {
     const device = await seedPendingDevice(request);
+    try {
+      await page.goto(`${CONSOLE_ORIGIN}/dashboard/devices`);
+      const row = await findDeviceRow(page, device.user_code);
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await row.getByRole("button").last().click();
+      await page.getByRole("menuitem", { name: /force[-\s]?expire/i }).click();
+      const confirmBtn = page
+        .getByRole("button", { name: /force[-\s]?expire|expire|confirm/i })
+        .last();
+      await expect(confirmBtn).toBeVisible();
 
-    await page.goto(`${CONSOLE_ORIGIN}/dashboard/devices`);
-    const row = page.locator("tr", { hasText: device.user_code }).first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.getByRole("button").last().click();
-    await page.getByRole("menuitem", { name: /force[-\s]?expire/i }).click();
-    const confirmBtn = page.getByRole("button", { name: /force[-\s]?expire|expire|confirm/i }).last();
-    await expect(confirmBtn).toBeVisible();
+      const expireResp = page.waitForResponse(
+        (r) =>
+          r.url().includes("/api/admin/devices/expire") &&
+          r.request().method() === "POST",
+        { timeout: 15_000 },
+      );
+      await confirmBtn.click();
+      const res = await expireResp;
+      expect(res.status(), "expire endpoint must 200").toBeLessThan(400);
+      await page.waitForTimeout(1_500);
 
-    const expireResp = page.waitForResponse(
-      (r) =>
-        r.url().includes("/api/admin/devices/expire") &&
-        r.request().method() === "POST",
-      { timeout: 15_000 },
-    );
-    await confirmBtn.click();
-    const res = await expireResp;
-    expect(res.status(), "expire endpoint must 200").toBeLessThan(400);
-    await page.waitForTimeout(1_500);
-
-    const rows = await d1Exec(
-      request,
-      "SELECT status FROM deviceCode WHERE userCode = ?",
-      [device.user_code],
-    );
-    expect(rows[0]?.status, "deviceCode.status must be 'expired'").toBe("expired");
+      const rows = await d1Exec(
+        request,
+        "SELECT status FROM deviceCode WHERE userCode = ?",
+        [device.user_code],
+      );
+      expect(rows[0]?.status, "deviceCode.status must be 'expired'").toBe("expired");
+    } finally {
+      await d1Exec(request, "DELETE FROM deviceCode WHERE userCode = ?", [
+        device.user_code,
+      ]);
+    }
   });
 });
