@@ -74,10 +74,38 @@ export function createRefreshTokenService(deps: {
     clientId: string;
     scope: string | null;
     createdAt: number;
+    predecessorId?: string;
   }) {
     const id = crypto.randomUUID();
     const refreshToken = randomToken();
     const tokenHash = await sha256Hex(refreshToken);
+    const expiresAt = input.createdAt + REFRESH_TOKEN_TTL_SECONDS * 1_000;
+    if (input.predecessorId !== undefined) {
+      const insertResult = await deps.db
+        .prepare(
+          `INSERT INTO device_refresh_token (
+            id, token_hash, family_id, user_id, session_id, client_id, scope,
+            created_at, expires_at, consumed_at, replaced_by_id
+          )
+          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL
+          WHERE EXISTS (SELECT 1 FROM device_refresh_token WHERE id = ?)`,
+        )
+        .bind(
+          id,
+          tokenHash,
+          input.familyId,
+          input.userId,
+          input.sessionId,
+          input.clientId,
+          input.scope,
+          input.createdAt,
+          expiresAt,
+          input.predecessorId,
+        )
+        .run();
+      return { id, refreshToken, inserted: insertResult.meta.changes > 0 };
+    }
+
     await deps.db
       .prepare(
         `INSERT INTO device_refresh_token (
@@ -94,10 +122,10 @@ export function createRefreshTokenService(deps: {
         input.clientId,
         input.scope,
         input.createdAt,
-        input.createdAt + REFRESH_TOKEN_TTL_SECONDS * 1_000,
+        expiresAt,
       )
       .run();
-    return { id, refreshToken };
+    return { id, refreshToken, inserted: true };
   }
 
   async function deleteFamily(familyId: string) {
@@ -109,7 +137,7 @@ export function createRefreshTokenService(deps: {
 
   async function revokeFamily(familyId: string) {
     const familyRows = await deps.db
-      .prepare("SELECT session_id FROM device_refresh_token WHERE family_id = ?")
+      .prepare("DELETE FROM device_refresh_token WHERE family_id = ? RETURNING session_id")
       .bind(familyId)
       .all<FamilySessionRow>();
 
@@ -121,8 +149,6 @@ export function createRefreshTokenService(deps: {
         .first<SessionTokenRow>();
       if (session) await deps.sessions.deleteSession(session.token);
     }
-
-    await deleteFamily(familyId);
   }
 
   return {
@@ -222,7 +248,12 @@ export function createRefreshTokenService(deps: {
         clientId: row.client_id,
         scope: row.scope,
         createdAt: refreshedAt,
+        predecessorId: row.id,
       });
+      if (!replacement.inserted) {
+        await deps.sessions.deleteSession(newSession.token);
+        return { ok: false, error: "invalid_grant" };
+      }
       await deps.db
         .prepare("UPDATE device_refresh_token SET replaced_by_id = ? WHERE id = ?")
         .bind(replacement.id, row.id)

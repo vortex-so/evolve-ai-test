@@ -13,6 +13,26 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function createStatementGate() {
+  let markReached: () => void = () => undefined;
+  let release: () => void = () => undefined;
+  const reached = new Promise<void>((resolve) => {
+    markReached = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    reached,
+    release,
+    async pause() {
+      markReached();
+      await blocked;
+    },
+  };
+}
+
 function createHarness(options: { entitled?: boolean; now?: number } = {}) {
   const db = new FakeD1();
   let currentNow = options.now ?? NOW;
@@ -261,5 +281,94 @@ describe("refresh token service", () => {
     ).resolves.toEqual({ ok: false, error: "invalid_grant" });
     expect(harness.deletedSessionTokens).toEqual(["old-access"]);
     expect(harness.db.refreshTokens).toHaveLength(0);
+  });
+
+  it("concurrent reuse: replay during the winner's rotation leaves no live session or refresh row (revoke-before-insert)", async () => {
+    const harness = createHarness();
+    const issued = await issueDefault(harness);
+    const familyId = harness.db.refreshTokens[0]?.family_id;
+    const insertGate = createStatementGate();
+    harness.db.beforeRun = async (sql, params) => {
+      if (sql.startsWith("insert into device_refresh_token") && params[4] === "new-session-1") {
+        await insertGate.pause();
+      }
+    };
+
+    const winner = harness.service.refresh({
+      refreshToken: issued.refreshToken,
+      clientId: "claude-desktop",
+    });
+    await insertGate.reached;
+
+    const replay = await harness.service.refresh({
+      refreshToken: issued.refreshToken,
+      clientId: "claude-desktop",
+    });
+    insertGate.release();
+    const winnerResult = await winner;
+
+    expect(replay).toEqual({ ok: false, error: "invalid_grant" });
+    expect(winnerResult).toEqual({ ok: false, error: "invalid_grant" });
+    expect(harness.db.sessions).toHaveLength(0);
+    expect(harness.db.refreshTokens.filter((row) => row.family_id === familyId)).toHaveLength(0);
+  });
+
+  it("concurrent reuse: replay after the winner's replacement insert revokes the new session too (insert-before-revoke)", async () => {
+    const harness = createHarness();
+    const issued = await issueDefault(harness);
+    const familyId = harness.db.refreshTokens[0]?.family_id;
+    const linkGate = createStatementGate();
+    harness.db.beforeRun = async (sql) => {
+      if (sql.includes("set replaced_by_id = ?")) await linkGate.pause();
+    };
+
+    const winner = harness.service.refresh({
+      refreshToken: issued.refreshToken,
+      clientId: "claude-desktop",
+    });
+    await linkGate.reached;
+
+    const replay = await harness.service.refresh({
+      refreshToken: issued.refreshToken,
+      clientId: "claude-desktop",
+    });
+    linkGate.release();
+    const winnerResult = await winner;
+
+    expect(replay).toEqual({ ok: false, error: "invalid_grant" });
+    expect(harness.db.sessions).toHaveLength(0);
+    expect(harness.db.refreshTokens.filter((row) => row.family_id === familyId)).toHaveLength(0);
+    if (winnerResult.ok) {
+      expect(
+        harness.db.sessions.some((session) => session.token === winnerResult.body.access_token),
+      ).toBe(false);
+    }
+  });
+
+  it("two simultaneous refreshes of the same token never yield a usable token", async () => {
+    const harness = createHarness();
+    const issued = await issueDefault(harness);
+    const familyId = harness.db.refreshTokens[0]?.family_id;
+
+    const results = await Promise.all([
+      harness.service.refresh({
+        refreshToken: issued.refreshToken,
+        clientId: "claude-desktop",
+      }),
+      harness.service.refresh({
+        refreshToken: issued.refreshToken,
+        clientId: "claude-desktop",
+      }),
+    ]);
+
+    expect(harness.db.sessions).toHaveLength(0);
+    expect(harness.db.refreshTokens.filter((row) => row.family_id === familyId)).toHaveLength(0);
+    for (const result of results) {
+      if (result.ok) {
+        expect(harness.db.sessions.some((session) => session.token === result.body.access_token)).toBe(
+          false,
+        );
+      }
+    }
   });
 });

@@ -56,6 +56,7 @@ export class FakeD1 {
   readonly refreshTokens: FakeRefreshTokenRow[] = [];
   readonly statements: Array<{ sql: string; params: unknown[] }> = [];
   forceNextConsumeChangesZero = false;
+  beforeRun?: (sql: string, params: readonly unknown[]) => Promise<void> | void;
 
   get database(): RefreshTokenDatabase {
     return this as unknown as RefreshTokenDatabase;
@@ -70,7 +71,10 @@ export class FakeD1 {
         return {
           first: async <T>() => this.first(normalized, params) as T | null,
           all: async <T>() => ({ ...result(), results: this.all(normalized, params) as T[] }),
-          run: async () => this.run(normalized, params),
+          run: async () => {
+            await this.beforeRun?.(normalized, params);
+            return this.run(normalized, params);
+          },
           raw: async <T>() => this.all(normalized, params) as T[],
         };
       },
@@ -96,6 +100,15 @@ export class FakeD1 {
   }
 
   private all(sql: string, params: unknown[]): unknown[] {
+    if (
+      sql.includes("delete from device_refresh_token where family_id = ? returning session_id")
+    ) {
+      const deleted = this.refreshTokens.filter((row) => row.family_id === params[0]);
+      const retained = this.refreshTokens.filter((row) => row.family_id !== params[0]);
+      this.refreshTokens.splice(0, this.refreshTokens.length, ...retained);
+      return deleted.map((row) => ({ session_id: row.session_id }));
+    }
+
     if (sql.includes("select session_id from device_refresh_token where family_id = ?")) {
       return this.refreshTokens
         .filter((row) => row.family_id === params[0])
@@ -107,6 +120,12 @@ export class FakeD1 {
 
   private run(sql: string, params: unknown[]): D1Result {
     if (sql.startsWith("insert into device_refresh_token")) {
+      if (
+        sql.includes("where exists") &&
+        !this.refreshTokens.some((row) => row.id === params[9])
+      ) {
+        return result(0);
+      }
       const [
         id,
         tokenHash,
