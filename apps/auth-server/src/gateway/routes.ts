@@ -52,11 +52,12 @@ async function gatewayHandler(c: GatewayContext) {
   const keyStoreDeps = {
     db: c.env.DB,
     litellm,
-    secret: c.env.BETTER_AUTH_SECRET,
+    secret: c.env.LITELLM_KEY_ENCRYPTION_SECRET || c.env.BETTER_AUTH_SECRET,
   };
 
   let userKey: string;
   try {
+    if (!keyStoreDeps.secret) throw new Error("No key encryption secret configured");
     userKey = await getOrProvisionUserKey(keyStoreDeps, {
       id: session.user.id,
       email: session.user.email,
@@ -65,6 +66,7 @@ async function gatewayHandler(c: GatewayContext) {
     console.error("LiteLLM key provisioning failed", {
       userId: session.user.id,
       errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message.slice(0, 300) : String(error),
     });
     return provisioningFailureResponse();
   }

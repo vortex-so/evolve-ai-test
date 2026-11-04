@@ -155,9 +155,11 @@ export async function requestApp(
     origin?: string | null;
     session?: TestSession | null;
     plans?: StatementPlan[];
+    env?: Record<string, string>;
   } = {},
 ) {
-  const { DB, env } = createTestEnv(options.plans ?? []);
+  const { DB, env: baseEnv } = createTestEnv(options.plans ?? []);
+  const env = { ...baseEnv, ...options.env };
   const headers = new Headers(options.headers ?? {});
   if (options.origin !== null) {
     headers.set("Origin", options.origin ?? TEST_CONSOLE_ORIGIN);

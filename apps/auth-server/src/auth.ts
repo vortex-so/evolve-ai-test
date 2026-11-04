@@ -14,6 +14,8 @@ export type Env = {
   INFERENCE_GATEWAY_BASE_URL: string;
   LITELLM_BASE_URL: string;
   LITELLM_ADMIN_KEY: string;
+  /** AES key-wrap secret for stored per-user LiteLLM keys; falls back to BETTER_AUTH_SECRET. */
+  LITELLM_KEY_ENCRYPTION_SECRET?: string;
   AUTH_WEB_ORIGIN: string;
   POSTMARK_SERVER_TOKEN: string;
   POSTMARK_FROM: string;

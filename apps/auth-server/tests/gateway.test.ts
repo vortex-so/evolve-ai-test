@@ -293,6 +293,54 @@ describe("inference gateway", () => {
     expect(await tokens.response.json()).toEqual({ path: "/v1/messages/count_tokens" });
   });
 
+  it("decrypts stored keys with LITELLM_KEY_ENCRYPTION_SECRET when it is set", async () => {
+    const sealed = await encryptSecret("dedicated-key-encryption-secret", USER.user.id, USER_KEY);
+    const upstreamFetch = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new Request(input, init).headers.get("authorization")).toBe(`Bearer ${USER_KEY}`);
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    const { response } = await requestApp("/v1/messages", {
+      method: "POST",
+      rawBody: "{}",
+      origin: null,
+      session: USER,
+      headers: { Authorization: "Bearer desktop-access" },
+      env: { LITELLM_KEY_ENCRYPTION_SECRET: "dedicated-key-encryption-secret" },
+      plans: [
+        entitledPlan(),
+        {
+          match: /SELECT key_ciphertext, key_iv, key_alias FROM litellm_user_key/i,
+          first: { key_ciphertext: sealed.ciphertext, key_iv: sealed.iv, key_alias: "a" },
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to provision keys when no encryption secret is configured", async () => {
+    const upstreamFetch = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstreamFetch);
+
+    const { response } = await requestApp("/v1/messages", {
+      method: "POST",
+      rawBody: "{}",
+      origin: null,
+      session: USER,
+      headers: { Authorization: "Bearer desktop-access" },
+      env: { BETTER_AUTH_SECRET: "", LITELLM_KEY_ENCRYPTION_SECRET: "" },
+      plans: [entitledPlan()],
+    });
+    const body = (await response.json()) as { error: { type: string } };
+
+    expect(response.status).toBe(502);
+    expect(body.error.type).toBe("api_error");
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it("provisions a key on first use when none is stored", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
