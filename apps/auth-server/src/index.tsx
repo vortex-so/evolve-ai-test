@@ -17,7 +17,7 @@ import { logAuditWriteFailure, writeAudit, type AuditWriteInput } from "./lib/au
 import { AdminGuardError, banSelfGuard, detectGuardFailure } from "./lib/admin-invariants";
 import { createAdminRoutes } from "./routes/admin";
 import { createGatewayRoutes } from "./gateway/routes";
-import { isEntitled } from "./lib/entitlement";
+import { isAdminRole, isEntitled } from "./lib/entitlement";
 import { createRefreshTokenService } from "./lib/refresh-token";
 import { createOAuthTokenHandler } from "./oauth/token";
 import { getStoredKeyAlias } from "./lib/key-store";
@@ -58,6 +58,18 @@ async function writeFailureAudit(c: AdminContext, input: AuditWriteInput): Promi
     await writeAudit(c.env, c.var.auditContext, input);
   } catch (error) {
     logAuditWriteFailure(error, input);
+  }
+}
+
+async function revokeUserSessions(c: AdminContext, userId: string): Promise<void> {
+  try {
+    const internalAdapter = (await c.var.auth.$context).internalAdapter;
+    await internalAdapter.deleteUserSessions(userId);
+  } catch (error) {
+    console.error("Better Auth session revocation after admin mutation failed", {
+      userId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
   }
 }
 
@@ -312,12 +324,16 @@ async function handleSetRole(
   const result = await c.env.DB.prepare(
     `UPDATE user SET role = ? WHERE id = ?
       AND (
-        role != 'admin'
-        OR ? = 'admin'
-        OR (SELECT COUNT(*) FROM user WHERE role = 'admin' AND id != ?) > 0
+        (role != 'admin' AND (',' || replace(role, ' ', '') || ',') NOT LIKE '%,admin,%')
+        OR (? = 'admin' OR (',' || replace(?, ' ', '') || ',') LIKE '%,admin,%')
+        OR (
+          SELECT COUNT(*) FROM user
+          WHERE (role = 'admin' OR (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%')
+            AND id != ?
+        ) > 0
       )`,
   )
-    .bind(newRole, targetUserId, newRole, targetUserId)
+    .bind(newRole, targetUserId, newRole, newRole, targetUserId)
     .run();
 
   const guardFailure = detectGuardFailure(result, "last_admin_protected", "Cannot demote the last admin");
@@ -342,6 +358,9 @@ async function handleSetRole(
     outcome: "success",
     status_code: 200,
   });
+  if (!isAdminRole(newRole)) {
+    await revokeUserSessions(c, targetUserId);
+  }
   if (auditFailure) {
     return auditFailure;
   }
@@ -370,8 +389,12 @@ async function handleRemoveUser(
   const result = await c.env.DB.prepare(
     `DELETE FROM user WHERE id = ?
       AND (
-        role != 'admin'
-        OR (SELECT COUNT(*) FROM user WHERE role = 'admin' AND id != ?) > 0
+        (role != 'admin' AND (',' || replace(role, ' ', '') || ',') NOT LIKE '%,admin,%')
+        OR (
+          SELECT COUNT(*) FROM user
+          WHERE (role = 'admin' OR (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%')
+            AND id != ?
+        ) > 0
       )`,
   )
     .bind(targetUserId, targetUserId)
@@ -399,6 +422,7 @@ async function handleRemoveUser(
     outcome: "success",
     status_code: 200,
   });
+  await revokeUserSessions(c, targetUserId);
   if (auditFailure) {
     return auditFailure;
   }
@@ -443,8 +467,39 @@ async function handleBanUser(
     `UPDATE user SET banned = 1, banReason = ?, banExpires = ?
       WHERE id = ?
         AND (
-          role != 'admin'
-          OR (SELECT COUNT(*) FROM user WHERE role = 'admin' AND banned = 0 AND id != ?) > 0
+          (role != 'admin' AND (',' || replace(role, ' ', '') || ',') NOT LIKE '%,admin,%')
+          OR (
+            SELECT COUNT(*) FROM user
+            WHERE (role = 'admin' OR (',' || replace(role, ' ', '') || ',') LIKE '%,admin,%')
+              AND (
+                COALESCE(banned, 0) = 0
+                OR (
+                  banExpires IS NOT NULL
+                  AND CASE
+                    WHEN typeof(banExpires) IN ('integer', 'real') THEN
+                      CASE
+                        WHEN abs(CAST(banExpires AS REAL)) < 1000000000000
+                          THEN CAST(banExpires AS REAL) * 1000
+                        ELSE CAST(banExpires AS REAL)
+                      END
+                    WHEN json_valid(trim(CAST(banExpires AS TEXT))) THEN
+                      CASE
+                        WHEN json_type(trim(CAST(banExpires AS TEXT))) IN ('integer', 'real') THEN
+                          CASE
+                            WHEN abs(CAST(banExpires AS REAL)) < 1000000000000
+                              THEN CAST(banExpires AS REAL) * 1000
+                            ELSE CAST(banExpires AS REAL)
+                          END
+                        ELSE NULL
+                      END
+                    WHEN unixepoch(CAST(banExpires AS TEXT)) IS NOT NULL THEN
+                      unixepoch(CAST(banExpires AS TEXT)) * 1000
+                    ELSE NULL
+                  END <= unixepoch('now') * 1000
+                )
+              )
+              AND id != ?
+          ) > 0
         )`,
   )
     .bind(reason, expires, targetUserId, targetUserId)
@@ -472,6 +527,7 @@ async function handleBanUser(
     outcome: "success",
     status_code: 200,
   });
+  await revokeUserSessions(c, targetUserId);
   if (auditFailure) {
     return auditFailure;
   }

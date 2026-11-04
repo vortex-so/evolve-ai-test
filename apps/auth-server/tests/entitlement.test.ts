@@ -69,6 +69,13 @@ describe("isEntitled", () => {
     );
   });
 
+  it("malformed banExpires on a banned user is treated as an active ban", async () => {
+    await expectEntitlement(
+      { role: "admin", banned: 1, banExpires: "not-a-date", assigned: 0 },
+      false,
+    );
+  });
+
   it("user whose ban has expired is entitled again when assigned", async () => {
     await expectEntitlement(
       { role: "user", banned: 1, banExpires: Date.parse("2025-12-31T23:59:59.000Z"), assigned: 1 },

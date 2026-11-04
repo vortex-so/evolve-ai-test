@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import type { Auth, Env } from "../auth";
+import { getActiveAdminStatus } from "./entitlement";
 
 export const ADMIN_CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
 export const ADMIN_CONSOLE_LOCAL_ORIGIN = "http://localhost:3001";
@@ -78,7 +79,7 @@ export const requireAdmin: MiddlewareHandler<AdminApp> = async (c, next) => {
     return adminJsonError("unauthenticated", 401);
   }
 
-  if (session.user.role !== "admin") {
+  if (!(await getActiveAdminStatus(c.env.DB, session.user.id))) {
     return adminJsonError("not_admin", 403);
   }
 

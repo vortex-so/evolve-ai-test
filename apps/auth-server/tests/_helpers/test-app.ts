@@ -11,6 +11,8 @@ export type TestSession = {
     id: string;
     email: string;
     role: string;
+    banned?: boolean | number | string | null;
+    banExpires?: string | number | null;
   };
   impersonatedBy?: {
     userId: string;
@@ -22,6 +24,7 @@ export type StatementPlan = {
   first?: unknown;
   all?: unknown[];
   run?: { meta?: { changes?: number } };
+  error?: Error;
 };
 
 type RecordedStatement = {
@@ -54,30 +57,46 @@ export class D1Spy {
         this.statements.push({ sql, params });
         const plan = findPlan();
         return {
-          first: async () => (plan?.first ?? null),
-          all: async () => ({ results: plan?.all ?? [], success: true, meta: d1Meta() }),
-          run: async () => ({ success: true, meta: d1Meta(plan?.run?.meta?.changes ?? 0) }),
-          raw: async () => plan?.all ?? [],
+          first: async () => {
+            if (plan?.error) throw plan.error;
+            return plan?.first ?? null;
+          },
+          all: async () => {
+            if (plan?.error) throw plan.error;
+            return { results: plan?.all ?? [], success: true, meta: d1Meta() };
+          },
+          run: async () => {
+            if (plan?.error) throw plan.error;
+            return { success: true, meta: d1Meta(plan?.run?.meta?.changes ?? 0) };
+          },
+          raw: async () => {
+            if (plan?.error) throw plan.error;
+            return plan?.all ?? [];
+          },
         };
       },
       first: async () => {
         this.statements.push({ sql, params: [] });
         const plan = findPlan();
+        if (plan?.error) throw plan.error;
         return plan?.first ?? null;
       },
       all: async () => {
         this.statements.push({ sql, params: [] });
         const plan = findPlan();
+        if (plan?.error) throw plan.error;
         return { results: plan?.all ?? [], success: true, meta: d1Meta() };
       },
       run: async () => {
         this.statements.push({ sql, params: [] });
         const plan = findPlan();
+        if (plan?.error) throw plan.error;
         return { success: true, meta: d1Meta(plan?.run?.meta?.changes ?? 0) };
       },
       raw: async () => {
         this.statements.push({ sql, params: [] });
         const plan = findPlan();
+        if (plan?.error) throw plan.error;
         return plan?.all ?? [];
       },
     };
@@ -92,20 +111,52 @@ export class D1Spy {
   }
 }
 
-export function createTestEnv(plans: StatementPlan[] = []) {
+export class KVSpy {
+  readonly deleted: string[] = [];
+  private readonly entries: Map<string, string>;
+
+  constructor(entries: Record<string, string> = {}) {
+    this.entries = new Map(Object.entries(entries));
+  }
+
+  async get(key: string) {
+    return this.entries.get(key) ?? null;
+  }
+
+  async put(key: string, value: string) {
+    this.entries.set(key, value);
+  }
+
+  async delete(key: string) {
+    this.deleted.push(key);
+    this.entries.delete(key);
+  }
+
+  async list() {
+    return { keys: [], list_complete: true, cursor: "" };
+  }
+
+  async getWithMetadata(key: string) {
+    return { value: this.entries.get(key) ?? null, metadata: null };
+  }
+
+  async consume() {
+    return { success: true };
+  }
+}
+
+export function createTestEnv(
+  plans: StatementPlan[] = [],
+  kvEntries: Record<string, string> = {},
+) {
   const DB = new D1Spy(plans);
+  const KV = new KVSpy(kvEntries);
   return {
     DB,
+    KV,
     env: {
       DB: DB as unknown as Env["DB"],
-      AUTH_KV: {
-        get: async () => null,
-        put: async () => undefined,
-        delete: async () => undefined,
-        list: async () => ({ keys: [], list_complete: true, cursor: "" }),
-        getWithMetadata: async () => ({ value: null, metadata: null }),
-        consume: async () => ({ success: true }),
-      } as unknown as Env["AUTH_KV"],
+      AUTH_KV: KV as unknown as Env["AUTH_KV"],
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret",
       NODE_ENV: "test",
       PUBLIC_ORIGIN: TEST_PUBLIC_ORIGIN,
@@ -155,10 +206,30 @@ export async function requestApp(
     origin?: string | null;
     session?: TestSession | null;
     plans?: StatementPlan[];
+    kvEntries?: Record<string, string>;
     env?: Record<string, string>;
   } = {},
 ) {
-  const { DB, env: baseEnv } = createTestEnv(options.plans ?? []);
+  const currentAdminQuery =
+    'SELECT role, banned, banExpires FROM "user" WHERE id = ?';
+  const plans = [...(options.plans ?? [])];
+  const hasCurrentAdminOverride = plans.some((plan) =>
+    typeof plan.match === "string"
+      ? currentAdminQuery.includes(plan.match)
+      : plan.match.test(currentAdminQuery),
+  );
+  if (options.session && !hasCurrentAdminOverride) {
+    plans.unshift({
+      match: currentAdminQuery,
+      first: {
+        role: options.session.user.role,
+        banned: options.session.user.banned ?? 0,
+        banExpires: options.session.user.banExpires ?? null,
+      },
+    });
+  }
+
+  const { DB, KV, env: baseEnv } = createTestEnv(plans, options.kvEntries);
   const env = { ...baseEnv, ...options.env };
   const headers = new Headers(options.headers ?? {});
   if (options.origin !== null) {
@@ -187,7 +258,7 @@ export async function requestApp(
     env,
   );
 
-  return { response, DB };
+  return { response, DB, KV };
 }
 
 export async function readJson(response: Response) {

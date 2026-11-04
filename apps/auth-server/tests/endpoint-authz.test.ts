@@ -54,4 +54,67 @@ describe("Phase 4 admin endpoint authz contract", () => {
     ).toBe(true);
     expect(body, `${path} must return a JSON payload on success`).not.toBeNull();
   });
+
+  it("rejects a demoted admin whose cached session still says admin", async () => {
+    const { response } = await requestApp("/admin/audit", {
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      plans: [
+        {
+          match: 'SELECT role, banned, banExpires FROM "user" WHERE id = ?',
+          first: { role: "user", banned: 0, banExpires: null },
+        },
+      ],
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "not_admin" });
+  });
+
+  it("rejects a banned admin whose cached session still says admin", async () => {
+    const { response } = await requestApp("/admin/audit", {
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      plans: [
+        {
+          match: 'SELECT role, banned, banExpires FROM "user" WHERE id = ?',
+          first: { role: "admin", banned: 1, banExpires: null },
+        },
+      ],
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "not_admin" });
+  });
+
+  it("rejects a deleted admin whose cached session still says admin", async () => {
+    const { response } = await requestApp("/admin/audit", {
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      plans: [
+        {
+          match: 'SELECT role, banned, banExpires FROM "user" WHERE id = ?',
+          first: null,
+        },
+      ],
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "not_admin" });
+  });
+
+  it("allows an admin whose temporary ban has expired", async () => {
+    const { response } = await requestApp("/admin/audit", {
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      plans: [
+        {
+          match: 'SELECT role, banned, banExpires FROM "user" WHERE id = ?',
+          first: { role: "admin", banned: 1, banExpires: "2020-01-01T00:00:00.000Z" },
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+  });
 });

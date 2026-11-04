@@ -27,6 +27,11 @@ describe("Phase 4 last-admin guard contract", () => {
       /UPDATE\s+user\s+SET\s+role[\s\S]*role\s*!=\s*'admin'/i,
       "guard SQL must be evaluated for last-admin role demotion",
     );
+    expectSql(
+      DB,
+      /LIKE\s*'%,admin,%'/i,
+      "setRole must protect comma-list admin roles",
+    );
   });
 
   it("allows setRole when another admin still exists", async () => {
@@ -41,7 +46,7 @@ describe("Phase 4 last-admin guard contract", () => {
     expect(response.status, "demoting an admin is allowed when a second admin exists").toBe(200);
     expectSql(
       DB,
-      /SELECT\s+COUNT\(\*\)\s+FROM\s+user\s+WHERE\s+role\s*=\s*'admin'\s+AND\s+id\s*!=/i,
+      /SELECT\s+COUNT\(\*\)\s+FROM\s+user[\s\S]*role\s*=\s*'admin'[\s\S]*id\s*!=/i,
       "setRole must count other admins, excluding the target user",
     );
   });
@@ -61,6 +66,11 @@ describe("Phase 4 last-admin guard contract", () => {
       /DELETE\s+FROM\s+user\s+WHERE\s+id\s*=\s*\?[\s\S]*role\s*!=\s*'admin'/i,
       "guard SQL must be evaluated for last-admin deletion",
     );
+    expectSql(
+      DB,
+      /LIKE\s*'%,admin,%'/i,
+      "removeUser must protect comma-list admin roles",
+    );
   });
 
   it("returns 409 when banUser targets the last unbanned admin", async () => {
@@ -75,8 +85,13 @@ describe("Phase 4 last-admin guard contract", () => {
     expect(response.status, "banUser must reject banning the last unbanned admin").toBe(409);
     expectSql(
       DB,
-      /UPDATE\s+user\s+SET\s+banned\s*=\s*1[\s\S]*banned\s*=\s*0\s+AND\s+id\s*!=/i,
-      "guard SQL must be evaluated for last active admin ban",
+      /UPDATE\s+user\s+SET\s+banned\s*=\s*1[\s\S]*typeof\s*\(\s*banExpires\s*\)[\s\S]*json_valid[\s\S]*unixepoch[\s\S]*ELSE\s+NULL[\s\S]*id\s*!=/i,
+      "guard SQL must parse numeric and ISO expiries while failing closed on malformed values",
+    );
+    expectSql(
+      DB,
+      /LIKE\s*'%,admin,%'/i,
+      "banUser must protect comma-list admin roles",
     );
   });
 });

@@ -28,11 +28,25 @@ function isBanActive(row: EntitlementRow, now: number): boolean {
   if (row.banExpires === null) return true;
 
   const expiresAt = parseExpiry(row.banExpires);
-  return expiresAt !== null && expiresAt > now;
+  return expiresAt === null || expiresAt > now;
 }
 
-function isAdminRole(role: string | null): boolean {
+export function isAdminRole(role: string | null): boolean {
   return role?.split(",").some((entry) => entry.trim() === "admin") ?? false;
+}
+
+export async function getActiveAdminStatus(
+  db: D1Database,
+  userId: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT role, banned, banExpires FROM "user" WHERE id = ?')
+    .bind(userId)
+    .first<Pick<EntitlementRow, "role" | "banned" | "banExpires">>();
+
+  if (!row) return false;
+  return isAdminRole(row.role) && !isBanActive({ ...row, assigned: 0 }, now);
 }
 
 export async function isEntitled(
