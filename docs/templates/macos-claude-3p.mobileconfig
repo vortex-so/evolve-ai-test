@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadContent</key>
+      <dict>
+        <key>com.anthropic.claudefordesktop</key>
+        <dict>
+          <key>Forced</key>
+          <array>
+            <dict>
+              <key>mcx_preference_settings</key>
+              <dict>
+                <key>bootstrapUrl</key>
+                <string>https://api.auth-dev.vortex.so/user/bootstrap</string>
+                <key>deploymentMode</key>
+                <string>3p</string>
+                <key>disableDeploymentModeChooser</key>
+                <string>true</string>
+              </dict>
+            </dict>
+          </array>
+        </dict>
+      </dict>
+      <key>PayloadDisplayName</key>
+      <string>Claude Desktop Managed Preferences</string>
+      <key>PayloadIdentifier</key>
+      <string>so.vortex.claude-desktop.3p.preferences</string>
+      <key>PayloadType</key>
+      <string>com.apple.ManagedClient.preferences</string>
+      <!-- Replace this placeholder with a newly generated uppercase UUID. -->
+      <key>PayloadUUID</key>
+      <string>BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+    </dict>
+  </array>
+  <key>PayloadDisplayName</key>
+  <string>Claude Desktop (Vortex SSO)</string>
+  <key>PayloadIdentifier</key>
+  <string>so.vortex.claude-desktop.3p</string>
+  <key>PayloadOrganization</key>
+  <string>Vortex</string>
+  <key>PayloadScope</key>
+  <string>System</string>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <!-- Replace this placeholder with a newly generated uppercase UUID. -->
+  <key>PayloadUUID</key>
+  <string>AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

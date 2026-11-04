@@ -1,0 +1,5 @@
+{
+  "bootstrapUrl": "https://api.auth-dev.vortex.so/user/bootstrap",
+  "deploymentMode": "3p",
+  "disableDeploymentModeChooser": true
+}
