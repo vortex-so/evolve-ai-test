@@ -103,4 +103,47 @@ describe("bootstrap flat v1 response format", () => {
     expect(second.response.headers.get("cache-control")).toBe("no-store");
     expect(await second.response.text()).toBe("");
   });
+
+  it("returns 304 when If-None-Match carries the weak form of the ETag", async () => {
+    const first = await requestFallback();
+    const etag = first.response.headers.get("etag");
+
+    expect(etag).toBeTruthy();
+
+    const second = await requestFallback({ "If-None-Match": `W/${etag}` });
+
+    expect(second.response.status).toBe(304);
+    expect(second.response.headers.get("etag")).toBe(etag);
+    expect(second.response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("returns 304 when the matching ETag is one of several listed", async () => {
+    const first = await requestFallback();
+    const etag = first.response.headers.get("etag");
+
+    expect(etag).toBeTruthy();
+
+    const second = await requestFallback({
+      "If-None-Match": `"different", W/${etag}, "also-different"`,
+    });
+
+    expect(second.response.status).toBe(304);
+    expect(second.response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("returns 304 for If-None-Match: *", async () => {
+    const { response } = await requestFallback({ "If-None-Match": "*" });
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("returns 200 when the ETag differs", async () => {
+    const { response } = await requestFallback({
+      "If-None-Match": `W/"different"`,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
 });

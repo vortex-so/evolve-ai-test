@@ -17,6 +17,16 @@ async function etagOf(config: BootstrapConfig): Promise<string> {
   return `"${hex}"`;
 }
 
+function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
+  if (!header) return false;
+
+  const opaqueTag = etag.replace(/^W\//, "");
+  return header.split(",").some((candidate) => {
+    const validator = candidate.trim();
+    return validator === "*" || validator.replace(/^W\//, "") === opaqueTag;
+  });
+}
+
 /**
  * GET /user/bootstrap
  *
@@ -63,7 +73,7 @@ export async function bootstrapHandler(
   const etag = await etagOf(config);
   c.header("ETag", etag);
 
-  if (c.req.header("if-none-match") === etag) {
+  if (ifNoneMatchMatches(c.req.header("if-none-match"), etag)) {
     return c.body(null, 304);
   }
 
