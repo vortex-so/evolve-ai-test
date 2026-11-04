@@ -126,6 +126,83 @@ describe("inference gateway", () => {
     expect(await upstreamRequest.text()).toBe(rawBody);
   });
 
+  it("never forwards caller-supplied credential headers upstream", async () => {
+    const upstreamRequests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        upstreamRequests.push(new Request(input, init));
+        return Response.json({ ok: true });
+      }),
+    );
+
+    const { response } = await gatewayRequest("/v1/messages", {
+      body: "{}",
+      headers: {
+        Authorization: "Bearer desktop-access",
+        "x-litellm-api-key": "caller-litellm-key",
+        "api-key": "caller-azure-key",
+        "x-goog-api-key": "caller-google-key",
+        "x-api-key": "caller-api-key",
+        cookie: "session=secret",
+        "x-forwarded-for": "203.0.113.10",
+        "proxy-authorization": "Basic caller-proxy-credential",
+        "x-custom-header": "caller-custom-value",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const upstreamRequest = upstreamRequests[0];
+    if (!upstreamRequest) throw new Error("Expected an upstream request");
+    expect(upstreamRequest.headers.get("authorization")).toBe(`Bearer ${USER_KEY}`);
+    for (const header of [
+      "x-litellm-api-key",
+      "api-key",
+      "x-goog-api-key",
+      "x-api-key",
+      "cookie",
+      "x-forwarded-for",
+      "proxy-authorization",
+      "x-custom-header",
+    ]) {
+      expect(upstreamRequest.headers.get(header)).toBeNull();
+    }
+  });
+
+  it("forwards Anthropic protocol headers", async () => {
+    const upstreamRequests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        upstreamRequests.push(new Request(input, init));
+        return Response.json({ ok: true });
+      }),
+    );
+    const expectedHeaders = {
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "context-1m-2025-08-07",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "x-stainless-lang": "js",
+      "x-claude-code-session-id": "session-123",
+      "x-app": "claude-code",
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "claude-cli/1.0",
+    };
+
+    const { response } = await gatewayRequest("/v1/messages", {
+      body: "{}",
+      headers: expectedHeaders,
+    });
+
+    expect(response.status).toBe(200);
+    const upstreamRequest = upstreamRequests[0];
+    if (!upstreamRequest) throw new Error("Expected an upstream request");
+    for (const [header, value] of Object.entries(expectedHeaders)) {
+      expect(upstreamRequest.headers.get(header)).toBe(value);
+    }
+  });
+
   it("missing bearer returns authentication_error and never calls upstream", async () => {
     const upstreamFetch = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", upstreamFetch);

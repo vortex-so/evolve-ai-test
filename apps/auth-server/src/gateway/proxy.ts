@@ -1,19 +1,15 @@
-const REQUEST_HEADERS_TO_REMOVE = new Set([
-  "authorization",
-  "x-api-key",
-  "cookie",
-  "host",
-  "content-length",
-  "connection",
-  "keep-alive",
-  "transfer-encoding",
-  "upgrade",
-  "te",
-  "trailer",
-  "x-real-ip",
-  "origin",
-  "referer",
+const REQUEST_HEADERS_TO_FORWARD = new Set([
+  "content-type",
+  "accept",
+  "user-agent",
+  "x-app",
 ]);
+
+const REQUEST_HEADER_PREFIXES_TO_FORWARD = [
+  "anthropic-",
+  "x-stainless-",
+  "x-claude-code-",
+];
 
 const RESPONSE_HEADERS_TO_REMOVE = new Set([
   "content-length",
@@ -28,12 +24,10 @@ type ProxyResult =
   | { kind: "unauthorized" }
   | { kind: "network_error" };
 
-function shouldRemoveRequestHeader(name: string): boolean {
+function shouldForwardRequestHeader(name: string): boolean {
   return (
-    REQUEST_HEADERS_TO_REMOVE.has(name) ||
-    name.startsWith("proxy-") ||
-    name.startsWith("cf-") ||
-    name.startsWith("x-forwarded-")
+    REQUEST_HEADERS_TO_FORWARD.has(name) ||
+    REQUEST_HEADER_PREFIXES_TO_FORWARD.some((prefix) => name.startsWith(prefix))
   );
 }
 
@@ -41,7 +35,7 @@ function proxyRequestHeaders(request: Request, userKey: string): Headers {
   const headers = new Headers();
   request.headers.forEach((value, name) => {
     const normalized = name.toLowerCase();
-    if (!shouldRemoveRequestHeader(normalized)) headers.append(name, value);
+    if (shouldForwardRequestHeader(normalized)) headers.append(name, value);
   });
   headers.set("authorization", `Bearer ${userKey}`);
   return headers;
