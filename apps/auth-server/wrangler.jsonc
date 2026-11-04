@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "evolve-ai-bootstrap-dev",
+  "main": "src/index.tsx",
+  "compatibility_date": "2024-12-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "672d1c1c2706c8738992bcd09704f6a4",
+  "vars": {
+    "NODE_ENV": "production",
+    "PUBLIC_ORIGIN": "https://api.auth-dev.vortex.so",
+    "INFERENCE_GATEWAY_BASE_URL": "https://api.auth-dev.vortex.so/v1",
+    "PRODUCT_NAME": "Vortex Auth",
+    "PRODUCT_URL": "https://auth.auth-dev.vortex.so"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "evolve-ai-bootstrap-dev",
+      "database_id": "0688760e-154e-4a61-8319-4e1d14a7c910",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "AUTH_KV",
+      "id": "1f449179a4b540829cd8a3211c3a087e"
+    }
+  ]
+}

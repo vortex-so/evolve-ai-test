@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "vortex-auth-web-dev",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "672d1c1c2706c8738992bcd09704f6a4",
+  "assets": {
+    "directory": "out",
+    "not_found_handling": "single-page-application"
+  },
+  "vars": {
+    "NEXT_PUBLIC_AUTH_API_URL": "https://api.auth-dev.vortex.so"
+  }
+}
