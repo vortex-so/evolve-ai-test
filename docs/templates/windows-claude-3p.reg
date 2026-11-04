@@ -1,0 +1,6 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Claude]
+"bootstrapUrl"="https://api.auth-dev.vortex.so/user/bootstrap"
+"deploymentMode"="3p"
+"disableDeploymentModeChooser"="true"
