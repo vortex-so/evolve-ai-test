@@ -19,7 +19,9 @@ export type LitellmClient = {
   generateKey(input: {
     userId: string;
     keyAlias: string;
+    purpose: "inference" | "mcp";
     metadata?: Record<string, string>;
+    mcpAccessGroup?: string;
   }): Promise<{ key: string; tokenId: string | null }>;
   deleteKeysByAlias(aliases: string[]): Promise<void>;
 };
@@ -196,15 +198,25 @@ export function createLitellmClient(opts: {
     },
 
     async generateKey(input) {
+      if (input.purpose === "mcp" && !input.mcpAccessGroup) {
+        throw new Error("MCP access group is required for MCP keys");
+      }
       const response = await request("/key/generate", {
         method: "POST",
         body: JSON.stringify({
           user_id: input.userId,
           key_alias: input.keyAlias,
           metadata: input.metadata ?? {},
-          models: [],
+          models: input.purpose === "mcp" ? ["no-default-models"] : [],
           max_budget: null,
           key_type: "llm_api",
+          ...(input.purpose === "mcp"
+            ? {
+                object_permission: {
+                  mcp_access_groups: [input.mcpAccessGroup!],
+                },
+              }
+            : {}),
         }),
       });
       const body = await readJson(response);

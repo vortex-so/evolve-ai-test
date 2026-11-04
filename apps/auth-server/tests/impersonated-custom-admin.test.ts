@@ -40,6 +40,11 @@ const cases = [
     method: "DELETE",
   },
   {
+    name: "POST /admin/users/:id/mcp-token/rotate",
+    path: "/admin/users/user-1/mcp-token/rotate",
+    method: "POST",
+  },
+  {
     name: "PATCH /admin/oauth-clients/:id",
     path: "/admin/oauth-clients/client-1",
     method: "PATCH",

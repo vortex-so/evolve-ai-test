@@ -53,6 +53,7 @@ async function gatewayHandler(c: GatewayContext) {
     db: c.env.DB,
     litellm,
     secret: c.env.LITELLM_KEY_ENCRYPTION_SECRET || c.env.BETTER_AUTH_SECRET,
+    mcpAccessGroup: c.env.LITELLM_MCP_ACCESS_GROUP,
   };
 
   let userKey: string;
@@ -61,7 +62,7 @@ async function gatewayHandler(c: GatewayContext) {
     userKey = await getOrProvisionUserKey(keyStoreDeps, {
       id: session.user.id,
       email: session.user.email,
-    });
+    }, "inference");
   } catch (error) {
     console.error("LiteLLM key provisioning failed", {
       userId: session.user.id,
@@ -82,7 +83,7 @@ async function gatewayHandler(c: GatewayContext) {
     return upstreamNetworkErrorResponse();
   }
 
-  await invalidateUserKey(keyStoreDeps, session.user.id);
+  await invalidateUserKey(keyStoreDeps, session.user.id, "inference");
   return upstreamKeyRejectedResponse();
 }
 

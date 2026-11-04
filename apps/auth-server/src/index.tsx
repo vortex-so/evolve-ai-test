@@ -17,6 +17,7 @@ import { logAuditWriteFailure, writeAudit, type AuditWriteInput } from "./lib/au
 import { AdminGuardError, banSelfGuard, detectGuardFailure } from "./lib/admin-invariants";
 import { createAdminRoutes } from "./routes/admin";
 import { createGatewayRoutes } from "./gateway/routes";
+import { mcpGatewayHandler } from "./gateway/mcp-routes";
 import { isAdminRole, isEntitled } from "./lib/entitlement";
 import { createRefreshTokenService } from "./lib/refresh-token";
 import { createOAuthTokenHandler } from "./oauth/token";
@@ -95,7 +96,7 @@ app.use("*", async (c, next) => {
     } catch {
       c.set("session", null);
     }
-  } else if (c.req.path.startsWith("/v1/") || c.req.path === "/device") {
+  } else if (c.req.path.startsWith("/v1/") || c.req.path.startsWith("/mcp/") || c.req.path === "/device") {
     c.set("session", null);
   } else {
     const session = await c.get("auth").api.getSession({ headers: c.req.raw.headers }).catch(() => null);
@@ -148,6 +149,7 @@ app.get("/device", (c) => {
 });
 
 app.route("/v1", createGatewayRoutes());
+app.all("/mcp/:server", mcpGatewayHandler);
 
 app.get("/user/bootstrap", (c) => bootstrapHandler(c));
 
@@ -384,7 +386,10 @@ async function handleRemoveUser(
     return adminJsonError("invalid_request", 400);
   }
 
-  const storedKeyAlias = await getStoredKeyAlias(c.env.DB, targetUserId);
+  const [storedInferenceKeyAlias, storedMcpKeyAlias] = await Promise.all([
+    getStoredKeyAlias(c.env.DB, targetUserId, "inference"),
+    getStoredKeyAlias(c.env.DB, targetUserId, "mcp"),
+  ]);
 
   const result = await c.env.DB.prepare(
     `DELETE FROM user WHERE id = ?
@@ -426,12 +431,15 @@ async function handleRemoveUser(
   if (auditFailure) {
     return auditFailure;
   }
-  if (storedKeyAlias) {
+  const storedKeyAliases = [storedInferenceKeyAlias, storedMcpKeyAlias].filter(
+    (alias): alias is string => alias !== null,
+  );
+  if (storedKeyAliases.length > 0) {
     try {
       await createLitellmClient({
         baseUrl: c.env.LITELLM_BASE_URL,
         adminKey: c.env.LITELLM_ADMIN_KEY,
-      }).deleteKeysByAlias([storedKeyAlias]);
+      }).deleteKeysByAlias(storedKeyAliases);
     } catch (error) {
       console.error("LiteLLM key cleanup after user removal failed", {
         userId: targetUserId,

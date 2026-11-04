@@ -43,6 +43,8 @@ function d1Meta(changes = 0) {
 
 export class D1Spy {
   readonly statements: RecordedStatement[] = [];
+  readonly executions: RecordedStatement[] = [];
+  readonly batches: RecordedStatement[][] = [];
 
   constructor(private readonly plans: StatementPlan[] = []) {}
 
@@ -56,45 +58,57 @@ export class D1Spy {
       bind: (...params: unknown[]) => {
         this.statements.push({ sql, params });
         const plan = findPlan();
-        return {
+        const bound = {
+          __sql: sql,
+          __params: params,
+          __plan: plan,
           first: async () => {
+            this.executions.push({ sql, params });
             if (plan?.error) throw plan.error;
             return plan?.first ?? null;
           },
           all: async () => {
+            this.executions.push({ sql, params });
             if (plan?.error) throw plan.error;
             return { results: plan?.all ?? [], success: true, meta: d1Meta() };
           },
           run: async () => {
+            this.executions.push({ sql, params });
             if (plan?.error) throw plan.error;
             return { success: true, meta: d1Meta(plan?.run?.meta?.changes ?? 0) };
           },
           raw: async () => {
+            this.executions.push({ sql, params });
             if (plan?.error) throw plan.error;
             return plan?.all ?? [];
           },
         };
+        return bound;
       },
       first: async () => {
         this.statements.push({ sql, params: [] });
+        this.executions.push({ sql, params: [] });
         const plan = findPlan();
         if (plan?.error) throw plan.error;
         return plan?.first ?? null;
       },
       all: async () => {
         this.statements.push({ sql, params: [] });
+        this.executions.push({ sql, params: [] });
         const plan = findPlan();
         if (plan?.error) throw plan.error;
         return { results: plan?.all ?? [], success: true, meta: d1Meta() };
       },
       run: async () => {
         this.statements.push({ sql, params: [] });
+        this.executions.push({ sql, params: [] });
         const plan = findPlan();
         if (plan?.error) throw plan.error;
         return { success: true, meta: d1Meta(plan?.run?.meta?.changes ?? 0) };
       },
       raw: async () => {
         this.statements.push({ sql, params: [] });
+        this.executions.push({ sql, params: [] });
         const plan = findPlan();
         if (plan?.error) throw plan.error;
         return plan?.all ?? [];
@@ -102,8 +116,24 @@ export class D1Spy {
     };
   }
 
-  batch<T>(items: T[]): Promise<T[]> {
-    return Promise.resolve(items.map(() => ({ results: [], success: true, meta: d1Meta() })) as T[]);
+  async batch<T>(items: T[]): Promise<T[]> {
+    const statements = items.map((item) => {
+      const prepared = item as T & {
+        __sql?: string;
+        __params?: unknown[];
+        __plan?: StatementPlan;
+      };
+      return {
+        sql: prepared.__sql ?? "",
+        params: prepared.__params ?? [],
+        plan: prepared.__plan,
+      };
+    });
+    this.batches.push(statements.map(({ sql, params }) => ({ sql, params })));
+    const failed = statements.find(({ plan }) => plan?.error);
+    if (failed?.plan?.error) throw failed.plan.error;
+    for (const { sql, params } of statements) this.executions.push({ sql, params });
+    return items.map(() => ({ results: [], success: true, meta: d1Meta() })) as T[];
   }
 
   exec(_sql: string): Promise<{ count: number }> {
@@ -163,6 +193,8 @@ export function createTestEnv(
       INFERENCE_GATEWAY_BASE_URL: TEST_PUBLIC_ORIGIN,
       LITELLM_BASE_URL: "https://llm-manager.example.test",
       LITELLM_ADMIN_KEY: "test-litellm-admin-key",
+      LITELLM_MCP_ACCESS_GROUP: "vortex-claude-desktop",
+      MCP_TOKEN_SECRET: "test-mcp-token-secret-test-mcp-token-secret",
       AUTH_WEB_ORIGIN: "https://auth.auth-dev.vortex.so",
       POSTMARK_SERVER_TOKEN: "test-postmark-token",
       POSTMARK_FROM: "noreply@auth-dev.vortex.so",

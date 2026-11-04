@@ -167,7 +167,7 @@ describe("LiteLLM management client", () => {
     });
   });
 
-  it("generateKey posts llm_api key with no budget or model restriction and returns key + tokenId", async () => {
+  it("generateKey creates an inference key without MCP object permissions", async () => {
     const stub = createFetchStub([
       jsonResponse({ key: "sk-plaintext-once", token_id: "token-123" }),
       jsonResponse({ key: "sk-without-token-id" }),
@@ -183,6 +183,7 @@ describe("LiteLLM management client", () => {
         userId: "user-123",
         keyAlias: "claude-desktop:user-123",
         metadata: { provisionedBy: "auth-worker" },
+        purpose: "inference",
       }),
     ).resolves.toEqual({ key: "sk-plaintext-once", tokenId: "token-123" });
     expect(stub.requests[0]?.url).toBe("https://llm-manager.fly.dev/key/generate");
@@ -200,8 +201,42 @@ describe("LiteLLM management client", () => {
       key_type: "llm_api",
     });
     await expect(
-      client.generateKey({ userId: "user-123", keyAlias: "alias-without-token-id" }),
+      client.generateKey({
+        userId: "user-123",
+        keyAlias: "alias-without-token-id",
+        purpose: "inference",
+      }),
     ).resolves.toEqual({ key: "sk-without-token-id", tokenId: null });
+  });
+
+  it("generateKey creates an MCP-only key with group access and no default models", async () => {
+    const stub = createFetchStub([
+      jsonResponse({ key: "sk-mcp", token_id: "mcp-token" }),
+    ]);
+    const client = createLitellmClient({
+      baseUrl: "https://llm-manager.fly.dev",
+      adminKey: "management-key",
+      fetch: stub.fetch,
+    });
+
+    await client.generateKey({
+      userId: "user-123",
+      keyAlias: "vortex-sso-mcp:user-123",
+      purpose: "mcp",
+      mcpAccessGroup: "vortex-claude-desktop",
+    });
+
+    expect(parseBody(stub.requests[0]!)).toEqual({
+      user_id: "user-123",
+      key_alias: "vortex-sso-mcp:user-123",
+      metadata: {},
+      models: ["no-default-models"],
+      max_budget: null,
+      key_type: "llm_api",
+      object_permission: {
+        mcp_access_groups: ["vortex-claude-desktop"],
+      },
+    });
   });
 
   it("deleteKeysByAlias posts key_aliases and tolerates 404", async () => {
@@ -251,7 +286,7 @@ describe("LiteLLM management client", () => {
     });
 
     const error = await client
-      .generateKey({ userId: "user-123", keyAlias: "alias" })
+      .generateKey({ userId: "user-123", keyAlias: "alias", purpose: "inference" })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(LitellmError);

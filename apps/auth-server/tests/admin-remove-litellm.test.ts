@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("admin user removal LiteLLM cleanup", () => {
-  it("deletes the LiteLLM key by alias after successful delete and audit", async () => {
+  it("deletes both purpose-separated LiteLLM keys by alias after successful delete and audit", async () => {
     const upstreamFetch = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", upstreamFetch);
 
@@ -26,6 +26,10 @@ describe("admin user removal LiteLLM cleanup", () => {
           first: { key_alias: "vortex-sso:target-user-id:stored" },
         },
         {
+          match: /SELECT key_alias FROM litellm_user_mcp_key/i,
+          first: { key_alias: "vortex-sso-mcp:target-user-id:stored" },
+        },
+        {
           match: /DELETE\s+FROM\s+user\s+WHERE\s+id\s*=\s*\?/i,
           run: { meta: { changes: 1 } },
         },
@@ -38,7 +42,10 @@ describe("admin user removal LiteLLM cleanup", () => {
     const [input, init] = upstreamFetch.mock.calls[0] ?? [];
     expect(String(input)).toBe("https://llm-manager.example.test/key/delete");
     expect(JSON.parse(String(init?.body))).toEqual({
-      key_aliases: ["vortex-sso:target-user-id:stored"],
+      key_aliases: [
+        "vortex-sso:target-user-id:stored",
+        "vortex-sso-mcp:target-user-id:stored",
+      ],
     });
   });
 
@@ -55,6 +62,10 @@ describe("admin user removal LiteLLM cleanup", () => {
         {
           match: /SELECT key_alias FROM litellm_user_key/i,
           first: { key_alias: "vortex-sso:last-admin-id:stored" },
+        },
+        {
+          match: /SELECT key_alias FROM litellm_user_mcp_key/i,
+          first: { key_alias: "vortex-sso-mcp:last-admin-id:stored" },
         },
         {
           match: /DELETE\s+FROM\s+user\s+WHERE\s+id\s*=\s*\?/i,
