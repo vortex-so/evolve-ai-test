@@ -24,6 +24,25 @@ type ProxyResult =
   | { kind: "unauthorized" }
   | { kind: "network_error" };
 
+type McpProxyResult =
+  | { kind: "response"; response: Response }
+  | { kind: "rejected"; status: 401 | 403 }
+  | { kind: "network_error" };
+
+const MCP_REQUEST_HEADERS_TO_FORWARD = new Set([
+  "content-type",
+  "accept",
+  "mcp-session-id",
+  "mcp-protocol-version",
+  "last-event-id",
+  "user-agent",
+]);
+
+const MCP_RESPONSE_HEADERS_TO_FORWARD = new Set([
+  "content-type",
+  "mcp-session-id",
+]);
+
 function shouldForwardRequestHeader(name: string): boolean {
   return (
     REQUEST_HEADERS_TO_FORWARD.has(name) ||
@@ -142,6 +161,67 @@ export async function proxyInferenceRequest(input: {
     kind: "response",
     response: new Response(upstream.body, { status: upstream.status, headers }),
   };
+}
+
+export async function proxyMcpRequest(input: {
+  request: Request;
+  baseUrl: string;
+  server: string;
+  userKey: string;
+  fetch?: typeof fetch;
+}): Promise<McpProxyResult> {
+  const requestUrl = new URL(input.request.url);
+  const upstreamUrl = `${input.baseUrl.replace(/\/+$/, "")}/${input.server}/mcp${requestUrl.search}`;
+  const headers = new Headers();
+  input.request.headers.forEach((value, name) => {
+    if (MCP_REQUEST_HEADERS_TO_FORWARD.has(name.toLowerCase())) headers.append(name, value);
+  });
+  headers.set("x-litellm-api-key", `Bearer ${input.userKey}`);
+
+  const hasBody = input.request.method !== "GET" && input.request.method !== "HEAD";
+  const init: RequestInit & { duplex?: "half" } = {
+    method: input.request.method,
+    headers,
+    body: hasBody ? input.request.body : null,
+    redirect: "manual",
+  };
+  if (hasBody) init.duplex = "half";
+
+  let upstream: Response;
+  try {
+    upstream = await (input.fetch ?? fetch)(upstreamUrl, init);
+  } catch {
+    return { kind: "network_error" };
+  }
+
+  if (upstream.status === 401 || upstream.status === 403) {
+    await upstream.arrayBuffer();
+    return { kind: "rejected", status: upstream.status };
+  }
+
+  const responseHeaders = new Headers();
+  upstream.headers.forEach((value, name) => {
+    if (MCP_RESPONSE_HEADERS_TO_FORWARD.has(name.toLowerCase())) {
+      responseHeaders.append(name, value);
+    }
+  });
+  responseHeaders.set("cache-control", "no-store");
+  return {
+    kind: "response",
+    response: new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    }),
+  };
+}
+
+export function mcpErrorResponse(error: string, status: number): Response {
+  const headers = new Headers({
+    "content-type": "application/json",
+    "cache-control": "no-store",
+  });
+  if (status === 401) headers.set("www-authenticate", "Bearer");
+  return new Response(JSON.stringify({ error }), { status, headers });
 }
 
 export function provisioningFailureResponse(): Response {

@@ -44,6 +44,7 @@ the BFF calls the auth server's protected admin API.
 | `/v1/messages` | LiteLLM-backed inference, streaming or non-streaming |
 | `/v1/messages/count_tokens` | Token counting through LiteLLM |
 | `/v1/models` | Model discovery through LiteLLM |
+| `/mcp/:server` | Per-user MCP gateway to LiteLLM-hosted servers allowed by the bootstrap profile |
 | `/api/auth/*` | Better Auth API |
 | `/admin/*` | Admin API used by the console BFF |
 
@@ -89,7 +90,7 @@ pnpm --filter @vortex/schema test
 ```
 
 Remote D1 migrations are checked in at `apps/auth-server/drizzle/0001` through
-`0005`. Apply them before deploying code that depends on them.
+`0008`. Apply them before deploying code that depends on them.
 
 ## Worker configuration
 
@@ -98,6 +99,7 @@ Non-secret values live in `apps/auth-server/wrangler.jsonc`:
 - `PUBLIC_ORIGIN`
 - `INFERENCE_GATEWAY_BASE_URL`, the API origin without `/v1`
 - `LITELLM_BASE_URL`
+- `LITELLM_MCP_ACCESS_GROUP`, the LiteLLM group granted to new per-user keys
 - `AUTH_WEB_ORIGIN`
 - `PRODUCT_NAME` and `PRODUCT_URL`
 
@@ -105,6 +107,7 @@ Worker secrets:
 
 - `BETTER_AUTH_SECRET` (non-empty, 32+ random characters)
 - `LITELLM_KEY_ENCRYPTION_SECRET`, encrypts stored per-user LiteLLM keys
+- `MCP_TOKEN_SECRET`, signs stable per-user MCP gateway tokens
 - `LITELLM_ADMIN_KEY`, a LiteLLM proxy-admin key
 - `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM`
 

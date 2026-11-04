@@ -10,6 +10,7 @@
     "PUBLIC_ORIGIN": "https://api.auth-dev.vortex.so",
     "INFERENCE_GATEWAY_BASE_URL": "https://api.auth-dev.vortex.so",
     "LITELLM_BASE_URL": "https://llm-manager.fly.dev",
+    "LITELLM_MCP_ACCESS_GROUP": "vortex-claude-desktop",
     "AUTH_WEB_ORIGIN": "https://auth.auth-dev.vortex.so",
     "PRODUCT_NAME": "Vortex Auth",
     "PRODUCT_URL": "https://auth.auth-dev.vortex.so"

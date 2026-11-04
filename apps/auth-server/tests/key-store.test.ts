@@ -51,6 +51,7 @@ function normalize(sql: string): string {
 
 class KeyStoreD1 {
   row: StoredKeyRow | null = null;
+  mcpRow: StoredKeyRow | null = null;
   forceNextInsertChangesZero = false;
   raceWinner: StoredKeyRow | null = null;
 
@@ -69,26 +70,36 @@ class KeyStoreD1 {
   }
 
   private first(sql: string, params: unknown[]): unknown {
-    if (sql.includes("from litellm_user_key where user_id = ?")) {
-      if (!this.row || this.row.user_id !== params[0]) return null;
-      if (sql.startsWith("select key_alias")) return { key_alias: this.row.key_alias };
+    if (
+      sql.includes("from litellm_user_key where user_id = ?") ||
+      sql.includes("from litellm_user_mcp_key where user_id = ?")
+    ) {
+      const row = sql.includes("litellm_user_mcp_key") ? this.mcpRow : this.row;
+      if (!row || row.user_id !== params[0]) return null;
+      if (sql.startsWith("select key_alias")) return { key_alias: row.key_alias };
       return {
-        key_ciphertext: this.row.key_ciphertext,
-        key_iv: this.row.key_iv,
-        key_alias: this.row.key_alias,
+        key_ciphertext: row.key_ciphertext,
+        key_iv: row.key_iv,
+        key_alias: row.key_alias,
       };
     }
     throw new Error(`Unsupported first() SQL: ${sql}`);
   }
 
   private run(sql: string, params: unknown[]): FakeD1Result {
-    if (sql.startsWith("insert into litellm_user_key")) {
+    if (
+      sql.startsWith("insert into litellm_user_key") ||
+      sql.startsWith("insert into litellm_user_mcp_key")
+    ) {
+      const isMcp = sql.startsWith("insert into litellm_user_mcp_key");
+      const existing = isMcp ? this.mcpRow : this.row;
       if (this.forceNextInsertChangesZero) {
         this.forceNextInsertChangesZero = false;
-        this.row = this.raceWinner;
+        if (isMcp) this.mcpRow = this.raceWinner;
+        else this.row = this.raceWinner;
         return result(0);
       }
-      if (this.row) return result(0);
+      if (existing) return result(0);
       const [
         userId,
         litellmUserId,
@@ -100,7 +111,7 @@ class KeyStoreD1 {
         createdAt,
         updatedAt,
       ] = params;
-      this.row = {
+      const inserted = {
         user_id: String(userId),
         litellm_user_id: String(litellmUserId),
         key_alias: String(keyAlias),
@@ -111,12 +122,20 @@ class KeyStoreD1 {
         created_at: Number(createdAt),
         updated_at: Number(updatedAt),
       };
+      if (isMcp) this.mcpRow = inserted;
+      else this.row = inserted;
       return result(1);
     }
 
-    if (sql.startsWith("delete from litellm_user_key where user_id = ?")) {
-      if (!this.row || this.row.user_id !== params[0]) return result(0);
-      this.row = null;
+    if (
+      sql.startsWith("delete from litellm_user_key where user_id = ?") ||
+      sql.startsWith("delete from litellm_user_mcp_key where user_id = ?")
+    ) {
+      const isMcp = sql.startsWith("delete from litellm_user_mcp_key");
+      const existing = isMcp ? this.mcpRow : this.row;
+      if (!existing || existing.user_id !== params[0]) return result(0);
+      if (isMcp) this.mcpRow = null;
+      else this.row = null;
       return result(1);
     }
 
@@ -151,6 +170,7 @@ function createDeps(db: KeyStoreD1, litellm: LitellmClient, secret = SECRET) {
     db: db.database,
     litellm,
     secret,
+    mcpAccessGroup: "vortex-claude-desktop",
     now: () => NOW,
     nonce: () => "nonce123",
   };
@@ -161,9 +181,10 @@ async function storedRow(input: {
   alias?: string;
   secret?: string;
   userId?: string;
+  aad?: string;
 }): Promise<StoredKeyRow> {
   const userId = input.userId ?? USER.id;
-  const sealed = await encryptSecret(input.secret ?? SECRET, userId, input.plaintext);
+  const sealed = await encryptSecret(input.secret ?? SECRET, input.aad ?? userId, input.plaintext);
   return {
     user_id: userId,
     litellm_user_id: "litellm-user-1",
@@ -182,7 +203,7 @@ describe("key store", () => {
     const db = new KeyStoreD1();
     const litellm = createLitellmFake();
 
-    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER)).resolves.toBe(
+    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference")).resolves.toBe(
       "sk-generated",
     );
     expect(litellm.findUserByEmail).toHaveBeenCalledWith(USER.email);
@@ -191,6 +212,7 @@ describe("key store", () => {
       userId: "litellm-user-1",
       keyAlias: "vortex-sso:user-1:nonce123",
       metadata: { source: "vortex-sso", vortex_user_id: USER.id },
+      purpose: "inference",
     });
   });
 
@@ -199,7 +221,7 @@ describe("key store", () => {
     const litellm = createLitellmFake();
     litellm.findUserByEmail.mockResolvedValue(null);
 
-    await getOrProvisionUserKey(createDeps(db, litellm.client), USER);
+    await getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference");
 
     expect(litellm.createUser).toHaveBeenCalledWith({
       userId: USER.id,
@@ -219,7 +241,7 @@ describe("key store", () => {
       .mockResolvedValueOnce({ user_id: "race-user", user_email: USER.email });
     litellm.createUser.mockRejectedValue(new LitellmError(409, "duplicate"));
 
-    await getOrProvisionUserKey(createDeps(db, litellm.client), USER);
+    await getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference");
 
     expect(litellm.findUserByEmail).toHaveBeenCalledTimes(2);
     expect(litellm.generateKey).toHaveBeenCalledWith(
@@ -231,7 +253,7 @@ describe("key store", () => {
     const db = new KeyStoreD1();
     const litellm = createLitellmFake();
 
-    await getOrProvisionUserKey(createDeps(db, litellm.client), USER);
+    await getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference");
 
     expect(db.row).not.toBeNull();
     expect(JSON.stringify(db.row)).not.toContain("sk-generated");
@@ -253,9 +275,9 @@ describe("key store", () => {
     const db = new KeyStoreD1();
     const litellm = createLitellmFake();
     const deps = createDeps(db, litellm.client);
-    await getOrProvisionUserKey(deps, USER);
+    await getOrProvisionUserKey(deps, USER, "inference");
 
-    await expect(getOrProvisionUserKey(deps, USER)).resolves.toBe("sk-generated");
+    await expect(getOrProvisionUserKey(deps, USER, "inference")).resolves.toBe("sk-generated");
     expect(litellm.findUserByEmail).toHaveBeenCalledTimes(1);
     expect(litellm.generateKey).toHaveBeenCalledTimes(1);
   });
@@ -265,7 +287,7 @@ describe("key store", () => {
     const litellm = createLitellmFake();
     const deps = { ...createDeps(db, litellm.client), secret: "" };
 
-    await expect(getOrProvisionUserKey(deps, USER)).rejects.toThrow();
+    await expect(getOrProvisionUserKey(deps, USER, "inference")).rejects.toThrow();
     expect(litellm.generateKey).toHaveBeenCalledTimes(1);
     expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith(["vortex-sso:user-1:nonce123"]);
     expect(db.row).toBeFalsy();
@@ -278,7 +300,7 @@ describe("key store", () => {
     const litellm = createLitellmFake();
     litellm.generateKey.mockResolvedValue({ key: "sk-loser", tokenId: "loser-token" });
 
-    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER)).resolves.toBe(
+    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference")).resolves.toBe(
       "sk-winner",
     );
     expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith([
@@ -293,7 +315,7 @@ describe("key store", () => {
     const litellm = createLitellmFake();
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER)).resolves.toBe(
+    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER, "inference")).resolves.toBe(
       "sk-generated",
     );
     expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith(["old-alias"]);
@@ -307,7 +329,7 @@ describe("key store", () => {
     db.row = await storedRow({ plaintext: "stored-key", alias: "stored-alias" });
     const litellm = createLitellmFake();
 
-    await invalidateUserKey(createDeps(db, litellm.client), USER.id);
+    await invalidateUserKey(createDeps(db, litellm.client), USER.id, "inference");
 
     expect(db.row).toBeNull();
     expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith(["stored-alias"]);
@@ -320,7 +342,7 @@ describe("key store", () => {
     litellm.deleteKeysByAlias.mockRejectedValue(new LitellmError(500, "unavailable"));
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await expect(invalidateUserKey(createDeps(db, litellm.client), USER.id)).resolves.toBeUndefined();
+    await expect(invalidateUserKey(createDeps(db, litellm.client), USER.id, "inference")).resolves.toBeUndefined();
     expect(db.row).toBeNull();
     expect(warning).toHaveBeenCalled();
     warning.mockRestore();
@@ -329,8 +351,50 @@ describe("key store", () => {
   it("getStoredKeyAlias returns the alias or null", async () => {
     const db = new KeyStoreD1();
 
-    await expect(getStoredKeyAlias(db.database, USER.id)).resolves.toBeNull();
+    await expect(getStoredKeyAlias(db.database, USER.id, "inference")).resolves.toBeNull();
     db.row = await storedRow({ plaintext: "stored-key", alias: "stored-alias" });
-    await expect(getStoredKeyAlias(db.database, USER.id)).resolves.toBe("stored-alias");
+    await expect(getStoredKeyAlias(db.database, USER.id, "inference")).resolves.toBe("stored-alias");
+  });
+
+  it("stores MCP keys in the MCP table with an MCP alias and purpose-specific AAD", async () => {
+    const db = new KeyStoreD1();
+    const litellm = createLitellmFake();
+
+    await expect(getOrProvisionUserKey(createDeps(db, litellm.client), USER, "mcp")).resolves.toBe(
+      "sk-generated",
+    );
+
+    expect(db.row).toBeNull();
+    expect(db.mcpRow?.key_alias).toBe("vortex-sso-mcp:user-1:nonce123");
+    expect(litellm.generateKey).toHaveBeenCalledWith({
+      userId: "litellm-user-1",
+      keyAlias: "vortex-sso-mcp:user-1:nonce123",
+      metadata: { source: "vortex-sso", vortex_user_id: USER.id },
+      purpose: "mcp",
+      mcpAccessGroup: "vortex-claude-desktop",
+    });
+    await expect(
+      decryptSecret(SECRET, `mcp:${USER.id}`, {
+        ciphertext: db.mcpRow?.key_ciphertext ?? "",
+        iv: db.mcpRow?.key_iv ?? "",
+      }),
+    ).resolves.toBe("sk-generated");
+  });
+
+  it("does not decrypt ciphertext from one key purpose as the other", async () => {
+    const db = new KeyStoreD1();
+    const litellm = createLitellmFake();
+    db.mcpRow = await storedRow({
+      plaintext: "inference-ciphertext",
+      alias: "wrong-purpose",
+      aad: USER.id,
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await getOrProvisionUserKey(createDeps(db, litellm.client), USER, "mcp");
+
+    expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith(["wrong-purpose"]);
+    expect(litellm.generateKey).toHaveBeenCalledTimes(1);
+    warning.mockRestore();
   });
 });

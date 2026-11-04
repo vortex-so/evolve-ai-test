@@ -5,7 +5,7 @@ import { isEntitled } from "../lib/entitlement";
 
 async function etagOf(config: BootstrapConfig): Promise<string> {
   const { expiresAt: _drop, ...stable } = config;
-  const canonical = JSON.stringify(stable, Object.keys(stable).sort());
+  const canonical = JSON.stringify(sortRecursively(stable));
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(canonical),
@@ -17,13 +17,23 @@ async function etagOf(config: BootstrapConfig): Promise<string> {
   return `"${hex}"`;
 }
 
+function sortRecursively(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortRecursively);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, sortRecursively(nested)]),
+  );
+}
+
 function ifNoneMatchMatches(header: string | undefined, etag: string): boolean {
   if (!header) return false;
 
   const opaqueTag = etag.replace(/^W\//, "");
   return header.split(",").some((candidate) => {
     const validator = candidate.trim();
-    return validator === "*" || validator.replace(/^W\//, "") === opaqueTag;
+    return validator !== "*" && validator.replace(/^W\//, "") === opaqueTag;
   });
 }
 
@@ -64,6 +74,8 @@ export async function bootstrapHandler(
 
   const config = await resolveUserProfile(c.env.DB, {
     gatewayBaseUrl: c.env.INFERENCE_GATEWAY_BASE_URL,
+    publicOrigin: c.env.PUBLIC_ORIGIN,
+    mcpTokenSecret: c.env.MCP_TOKEN_SECRET,
     user: {
       id: session.user.id,
       email: session.user.email,
