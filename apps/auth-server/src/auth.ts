@@ -5,10 +5,13 @@ import { passkey } from "@better-auth/passkey";
 import { kvSecondaryStorage } from "./lib/kv-storage";
 import { sendTemplateSafe } from "./lib/postmark";
 
+const INSECURE_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
+
 export type Env = {
   DB: D1Database;
   AUTH_KV: KVNamespace;
   BETTER_AUTH_SECRET: string;
+  BETTER_AUTH_SECRET_PREVIOUS?: string;
   NODE_ENV: string;
   PUBLIC_ORIGIN: string;
   INFERENCE_GATEWAY_BASE_URL: string;
@@ -30,6 +33,28 @@ export type Env = {
  * module init. We construct once per request and pass through Hono's context.
  */
 export function createAuth(env: Env) {
+  const currentSecret = env.BETTER_AUTH_SECRET?.trim();
+  const previousSecret = env.BETTER_AUTH_SECRET_PREVIOUS?.trim();
+  if (env.NODE_ENV !== "test") {
+    if (!currentSecret || currentSecret.length < 32) {
+      throw new Error("BETTER_AUTH_SECRET must be at least 32 characters outside tests");
+    }
+    if (currentSecret === INSECURE_DEFAULT_SECRET) {
+      throw new Error("BETTER_AUTH_SECRET must not use Better Auth's public default");
+    }
+    if (previousSecret && previousSecret.length < 32) {
+      throw new Error("BETTER_AUTH_SECRET_PREVIOUS must be at least 32 characters when set");
+    }
+    if (previousSecret === INSECURE_DEFAULT_SECRET) {
+      throw new Error(
+        "BETTER_AUTH_SECRET_PREVIOUS cannot preserve Better Auth's public default",
+      );
+    }
+    if (previousSecret === currentSecret) {
+      throw new Error("BETTER_AUTH_SECRET_PREVIOUS must differ from BETTER_AUTH_SECRET");
+    }
+  }
+
   const rpID = new URL(env.PUBLIC_ORIGIN).hostname;
   const postmarkCfg = {
     token: env.POSTMARK_SERVER_TOKEN,
@@ -40,7 +65,13 @@ export function createAuth(env: Env) {
 
   return betterAuth({
     baseURL: env.PUBLIC_ORIGIN,
-    secret: env.BETTER_AUTH_SECRET,
+    secret: previousSecret || currentSecret,
+    secrets: currentSecret
+      ? [
+          { version: 2, value: currentSecret },
+          ...(previousSecret ? [{ version: 1, value: previousSecret }] : []),
+        ]
+      : undefined,
     database: env.DB,
     secondaryStorage: kvSecondaryStorage(env.AUTH_KV),
     session: {
