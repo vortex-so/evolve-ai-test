@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-test.use({ storageState: { cookies: [], origins: [] } });
-
 const AUTH_ORIGIN = "https://auth.auth-dev.vortex.so";
 const CONSOLE_ORIGIN =
   process.env.PLAYWRIGHT_CONSOLE_ORIGIN ?? "https://console.auth-dev.vortex.so";
@@ -20,14 +18,26 @@ async function signInThroughUI(
 ) {
   await page.getByRole("textbox", { name: /email/i }).fill(email);
   await page.getByRole("textbox", { name: /password/i }).fill(password);
+  const signInResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/auth/sign-in/email") &&
+      response.request().method() === "POST",
+    { timeout: 15_000 },
+  );
   await page.getByRole("button", { name: /^sign in$/i }).click();
+  const response = await signInResponse;
+  expect(
+    response.ok(),
+    `sign-in: ${response.status()} ${await response.text()}`,
+  ).toBe(true);
 }
 
 test.describe("Vortex admin console — auth + admin guard", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
   test("unauthenticated console/dashboard redirects to sign-in with redirect param", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await expect(page).toHaveURL(
       new RegExp(
@@ -39,10 +49,9 @@ test.describe("Vortex admin console — auth + admin guard", () => {
     );
   });
 
-  test("admin sign-in redirects back to console dashboard (cross-origin nav + redirectTo)", async ({
+  test("admin sign-in redirects back to console dashboard (cross-origin nav + redirect)", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await page.waitForURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
     await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
@@ -52,18 +61,13 @@ test.describe("Vortex admin console — auth + admin guard", () => {
     );
     await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();
   });
+});
 
+test.describe("Vortex admin console — auth + admin guard", () => {
   test("admin can see all 7 side-nav links and each renders without a server error", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
-    await page.waitForURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
-    await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
-    await page.waitForURL(
-      (url) => url.origin === CONSOLE_ORIGIN && url.pathname === "/dashboard",
-      { timeout: 45_000 },
-    );
 
     const nav = page.locator("nav, aside").first();
     for (const label of [
@@ -93,11 +97,14 @@ test.describe("Vortex admin console — auth + admin guard", () => {
       );
     }
   });
+});
+
+test.describe("Vortex admin console — auth + admin guard", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test("sign-out clears the session cookie across .auth-dev.vortex.so", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await page.waitForURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
     await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
@@ -130,11 +137,14 @@ test.describe("Vortex admin console — auth + admin guard", () => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await expect(page).toHaveURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
   });
+});
+
+test.describe("Vortex admin console — auth + admin guard", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test("non-admin user is blocked from console/dashboard (redirects to /403 or sign-in)", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
     await page.waitForURL(new RegExp(`^${AUTH_ORIGIN}/auth/sign-in`));
     await signInThroughUI(page, NON_ADMIN_EMAIL, NON_ADMIN_PASSWORD);
@@ -162,7 +172,6 @@ test.describe("Vortex admin console — auth + admin guard", () => {
   test("admin sign-in → nav to console.auth-dev directly → session preserved (cross-subdomain cookie)", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/sign-in`);
     await signInThroughUI(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.waitForURL((url) => url.pathname === "/" || url.pathname.startsWith("/dashboard"));

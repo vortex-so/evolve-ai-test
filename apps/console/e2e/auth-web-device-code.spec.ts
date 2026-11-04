@@ -1,16 +1,16 @@
 import { expect, test } from "@playwright/test";
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   AUTH_API_ORIGIN,
   AUTH_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 async function initiateDevice(request: import("@playwright/test").APIRequestContext) {
   const res = await request.post(`${AUTH_API_ORIGIN}/oauth/device`, {
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      Origin: AUTH_ORIGIN,
+      "content-type": "application/x-www-form-urlencoded",
+    },
     form: {
       client_id: "claude-desktop",
       scope: "openid offline_access bootstrap:read",
@@ -26,11 +26,6 @@ async function initiateDevice(request: import("@playwright/test").APIRequestCont
 }
 
 test.describe("auth-web /auth/device (device code flow)", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
-  });
-
   test("/auth/device without user_code renders manual code entry form", async ({ page }) => {
     await page.goto(`${AUTH_ORIGIN}/auth/device`);
     await page.waitForTimeout(2_000);

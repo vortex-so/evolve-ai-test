@@ -1,10 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { ADMIN_EMAIL, AUTH_ORIGIN } from "./helpers";
 
-test.use({ storageState: "e2e/.auth/admin.json" });
-
 test.describe("auth-web settings", () => {
-
   test("/settings/account renders profile + verified badge + sign-out", async ({ page }) => {
     await page.goto(`${AUTH_ORIGIN}/settings/account`);
     await expect(page.getByText(ADMIN_EMAIL)).toBeVisible();

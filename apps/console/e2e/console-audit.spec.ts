@@ -1,19 +1,12 @@
 import { expect, test } from "@playwright/test";
 import {
   ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   AUTH_API_ORIGIN,
   CONSOLE_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 test.describe("console /audit", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
-  });
-
   test("audit list renders filter toolbar + column headers", async ({ page }) => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard/audit`);
     await expect(page.locator("body")).not.toContainText(

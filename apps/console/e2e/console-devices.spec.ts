@@ -1,16 +1,17 @@
 import { expect, test } from "@playwright/test";
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   AUTH_API_ORIGIN,
+  AUTH_ORIGIN,
   CONSOLE_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 async function seedPendingDevice(request: import("@playwright/test").APIRequestContext) {
   const res = await request.post(`${AUTH_API_ORIGIN}/oauth/device`, {
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      Origin: AUTH_ORIGIN,
+      "content-type": "application/x-www-form-urlencoded",
+    },
     form: {
       client_id: "claude-desktop",
       scope: "openid offline_access bootstrap:read",
@@ -28,11 +29,6 @@ async function seedPendingDevice(request: import("@playwright/test").APIRequestC
 }
 
 test.describe("console /devices", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
-  });
-
   test("devices list renders (columns + rows if any)", async ({ page }) => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard/devices`);
     await expect(page.locator("body")).not.toContainText(

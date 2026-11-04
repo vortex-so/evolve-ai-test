@@ -1,10 +1,8 @@
-import { expect, test } from "@playwright/test";
+import { expect, request as apiRequest, test } from "@playwright/test";
 import {
   ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   CONSOLE_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 async function callBff(page: import("@playwright/test").Page, path: string, init?: RequestInit) {
@@ -23,8 +21,6 @@ async function callBff(page: import("@playwright/test").Page, path: string, init
 
 test.describe("console admin invariants (server-side guards)", () => {
   test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto(`${CONSOLE_ORIGIN}/dashboard`);
   });
 
@@ -117,12 +113,20 @@ test.describe("console admin invariants (server-side guards)", () => {
     expect(res.status, `expected 409, got ${res.status}: ${res.body}`).toBe(409);
     expect(res.body).toMatch(/system_profile_protected/);
   });
+});
 
-  test("BFF rejects request with NO session cookie (401 unauthenticated)", async ({ request }) => {
-    const res = await request.get(`${CONSOLE_ORIGIN}/api/admin/users`, {
-      headers: { Origin: CONSOLE_ORIGIN },
+test.describe("console admin invariants (server-side guards)", () => {
+  test("BFF rejects request with NO session cookie (401 unauthenticated)", async () => {
+    const anonymousRequest = await apiRequest.newContext({
+      storageState: { cookies: [], origins: [] },
     });
-    expect([401, 403], `expected 401/403, got ${res.status()}`).toContain(res.status());
+    try {
+      const res = await anonymousRequest.get(`${CONSOLE_ORIGIN}/api/admin/users`, {
+        headers: { Origin: CONSOLE_ORIGIN },
+      });
+      expect(res.status()).toBe(401);
+    } finally {
+      await anonymousRequest.dispose();
+    }
   });
-
 });

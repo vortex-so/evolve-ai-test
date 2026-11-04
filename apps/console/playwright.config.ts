@@ -21,6 +21,7 @@ export default defineConfig({
   globalSetup: path.resolve(__dirname, "e2e/helpers/global-setup.ts"),
   use: {
     baseURL: CONSOLE_ORIGIN,
+    storageState: ADMIN_STATE,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

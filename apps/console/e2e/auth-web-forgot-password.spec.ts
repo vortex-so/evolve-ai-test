@@ -6,11 +6,12 @@ import {
   waitForRecentMessage,
 } from "./helpers";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe("auth-web forgot-password", () => {
   test("submit renders + reset endpoint returns 200 or 429 (rate-limit-tolerant)", async ({
     page,
   }) => {
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/forgot-password`);
 
     await expect(page.getByRole("textbox", { name: /^email$/i })).toBeVisible();
@@ -39,7 +40,6 @@ test.describe("auth-web forgot-password", () => {
     test.skip(!postmarkAvailable(), "PLAYWRIGHT_POSTMARK_TOKEN not set — skipping delivery check");
 
     const start = Date.now();
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/forgot-password`);
 
     const resetResponse = page.waitForResponse(

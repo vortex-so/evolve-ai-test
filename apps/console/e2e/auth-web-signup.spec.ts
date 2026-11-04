@@ -9,10 +9,11 @@ import {
   uniqueEmail,
 } from "./helpers";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe("auth-web sign-up", () => {
   test("sign-up form renders + submits (rate-limit-tolerant)", async ({ page, request }) => {
     const email = uniqueEmail("signup-happy");
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/sign-up`);
 
     await expect(page.getByRole("textbox", { name: /^name$/i })).toBeVisible();
@@ -43,7 +44,6 @@ test.describe("auth-web sign-up", () => {
 
   test("rejects invalid email (no D1 row created)", async ({ page, request }) => {
     const email = "not-an-email";
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/sign-up`);
     await page.getByRole("textbox", { name: /^name$/i }).fill("Bad Email");
     await page.getByRole("textbox", { name: /^email$/i }).fill(email);
@@ -56,7 +56,6 @@ test.describe("auth-web sign-up", () => {
   });
 
   test("duplicate email (reuses seeded user) does NOT create a session", async ({ page }) => {
-    await page.context().clearCookies();
     await page.goto(`${AUTH_ORIGIN}/auth/sign-up`);
     await page.getByRole("textbox", { name: /^name$/i }).fill("Second Attempt");
     await page.getByRole("textbox", { name: /^email$/i }).fill(NON_ADMIN_EMAIL);

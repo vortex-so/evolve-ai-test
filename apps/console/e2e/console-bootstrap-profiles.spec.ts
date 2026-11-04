@@ -1,18 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   CONSOLE_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 test.describe("console /bootstrap-profiles", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
-  });
-
   test("list renders cowork-user with System badge + New profile button", async ({ page }) => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard/bootstrap-profiles`);
     await expect(page.getByRole("heading", { name: /bootstrap profiles/i })).toBeVisible();

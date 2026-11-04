@@ -1,15 +1,13 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   AUTH_API_ORIGIN,
   AUTH_ORIGIN,
   CONSOLE_ORIGIN,
   NON_ADMIN_EMAIL,
+  NON_ADMIN_PASSWORD,
   d1Exec,
   selectUser,
-  signInViaApi,
 } from "./helpers";
 
 const NON_ADMIN_NAME_RE = /E2E NonAdmin/;
@@ -26,9 +24,7 @@ async function openActionsFor(page: Page, email: string, nameRe: RegExp) {
 }
 
 test.describe("console /users row actions", () => {
-  test.beforeEach(async ({ page, request }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
+  test.beforeEach(async ({ request }) => {
     await d1Exec(
       request,
       "UPDATE user SET banned = 0, banReason = NULL, banExpires = NULL, role = 'user' WHERE email = ?",
@@ -77,9 +73,12 @@ test.describe("console /users row actions", () => {
   test("revoke all sessions removes the target user's session rows", async ({ page, request }) => {
     const seedRes = await request.post(`${AUTH_API_ORIGIN}/api/auth/sign-in/email`, {
       headers: { Origin: AUTH_ORIGIN, "Content-Type": "application/json" },
-      data: { email: NON_ADMIN_EMAIL, password: "password12345" },
+      data: { email: NON_ADMIN_EMAIL, password: NON_ADMIN_PASSWORD },
     });
-    expect(seedRes.ok(), "seed sign-in must succeed").toBe(true);
+    expect(
+      seedRes.ok(),
+      `seed sign-in: ${seedRes.status()} ${await seedRes.text()}`,
+    ).toBe(true);
 
     const beforeRows = await d1Exec(
       request,

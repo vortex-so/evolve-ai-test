@@ -1,18 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD,
   CONSOLE_ORIGIN,
   d1Exec,
-  signInViaApi,
 } from "./helpers";
 
 test.describe("console /oauth-clients", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.context().clearCookies();
-    await signInViaApi(page.context(), ADMIN_EMAIL, ADMIN_PASSWORD);
-  });
-
   test("claude-desktop system client cannot be deleted (row action Delete disabled)", async ({ page }) => {
     await page.goto(`${CONSOLE_ORIGIN}/dashboard/oauth-clients`);
     const row = page.locator("tr", { hasText: /claude-desktop/i }).first();
