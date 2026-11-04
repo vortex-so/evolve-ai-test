@@ -7,6 +7,7 @@ import {
   ADMIN_PASSWORD,
   AUTH_API_ORIGIN,
   AUTH_ORIGIN,
+  CONSOLE_ORIGIN,
 } from "./constants";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,7 +15,7 @@ export const ADMIN_STATE_PATH = path.join(__dirname, "..", ".auth", "admin.json"
 
 const HOST_RESOLVER_RULES = process.env.PLAYWRIGHT_HOST_RESOLVER_RULES;
 
-async function signInAdmin(context: import("@playwright/test").APIRequestContext) {
+async function signInAdmin(context: import("@playwright/test").APIRequestContext): Promise<string> {
   const res = await context.post(`${AUTH_API_ORIGIN}/api/auth/sign-in/email`, {
     headers: { Origin: AUTH_ORIGIN, "Content-Type": "application/json" },
     data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
@@ -23,6 +24,25 @@ async function signInAdmin(context: import("@playwright/test").APIRequestContext
   if (!res.ok()) {
     throw new Error(
       `global-setup admin sign-in failed: ${res.status()} ${await res.text()}`,
+    );
+  }
+  const body = (await res.json()) as { user?: { id?: string } };
+  if (!body.user?.id) throw new Error("global-setup admin sign-in returned no user id");
+  return body.user.id;
+}
+
+async function revokeAllAdminSessions(
+  context: import("@playwright/test").APIRequestContext,
+  userId: string,
+) {
+  const res = await context.post(`${AUTH_API_ORIGIN}/api/auth/admin/revoke-user-sessions`, {
+    headers: { Origin: CONSOLE_ORIGIN, "Content-Type": "application/json" },
+    data: { userId },
+    timeout: 60_000,
+  });
+  if (!res.ok()) {
+    throw new Error(
+      `global-setup revoke-user-sessions failed: ${res.status()} ${await res.text()}`,
     );
   }
 }
@@ -37,6 +57,8 @@ export default async function globalSetup() {
   const req = await apiRequest.newContext();
 
   try {
+    const adminId = await signInAdmin(req);
+    await revokeAllAdminSessions(req, adminId);
     await signInAdmin(req);
     const cookies = await req.storageState();
     await context.addCookies(cookies.cookies);
