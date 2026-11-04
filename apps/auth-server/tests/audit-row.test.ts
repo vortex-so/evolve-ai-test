@@ -57,4 +57,23 @@ describe("Phase 4 audit row contract", () => {
       "failed admin mutations must write outcome='failure' and the returned status_code to audit_log",
     ).toBe(true);
   });
+
+  it("redacts the password bound by the set-user-password admin proxy audit row", async () => {
+    const password = "plain-text-password-value";
+    const { DB } = await requestApp("/api/auth/admin/set-user-password", {
+      method: "POST",
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      body: { userId: "target-user-id", newPassword: password },
+    });
+
+    const auditInsert = DB.statements.find(({ sql }) =>
+      /INSERT\s+INTO\s+audit_log/i.test(sql),
+    );
+    expect(auditInsert, "set-user-password must write an audit_log row").toBeDefined();
+
+    const targetSnapshot = String(auditInsert?.params[10]);
+    expect(targetSnapshot).toContain("[REDACTED]");
+    expect(targetSnapshot).not.toContain(password);
+  });
 });

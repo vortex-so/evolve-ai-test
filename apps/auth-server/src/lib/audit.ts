@@ -11,9 +11,55 @@ export type AuditWriteInput = {
   metadata?: unknown;
 };
 
+const REDACTED_VALUE = "[REDACTED]";
+const SENSITIVE_KEY_PATTERN = /pass(word)?|secret|token|api[_-]?key|authorization|otp|code_verifier|private[_-]?key|client[_-]?secret/i;
+const AUDIT_KEY_ALLOWLIST = new Set(["token_endpoint"]);
+
+function redactAuditValueRecursive(
+  value: unknown,
+  seen: WeakSet<object>,
+): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return REDACTED_VALUE;
+  }
+
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => redactAuditValueRecursive(item, seen));
+    }
+
+    const redacted: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      redacted[key] =
+        !AUDIT_KEY_ALLOWLIST.has(key) && SENSITIVE_KEY_PATTERN.test(key)
+          ? REDACTED_VALUE
+          : redactAuditValueRecursive(nestedValue, seen);
+    }
+    return redacted;
+  } finally {
+    seen.delete(value);
+  }
+}
+
+export function redactAuditValue(value: unknown): unknown {
+  try {
+    return redactAuditValueRecursive(value, new WeakSet());
+  } catch (error) {
+    console.error("Audit value redaction failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    return value !== null && typeof value === "object" ? REDACTED_VALUE : value;
+  }
+}
+
 function stringifyOrNull(value: unknown): string | null {
   if (value === undefined) return null;
-  return JSON.stringify(value);
+  return JSON.stringify(redactAuditValue(value));
 }
 
 export function logAuditWriteFailure(error: unknown, input: AuditWriteInput): void {
