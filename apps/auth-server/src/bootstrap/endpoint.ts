@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import { resolveUserProfile, type BootstrapConfig } from "./profiles";
 import type { Auth, Env } from "../auth";
+import { isEntitled } from "../lib/entitlement";
 
 async function etagOf(config: BootstrapConfig): Promise<string> {
   const { expiresAt: _drop, ...stable } = config;
@@ -24,7 +25,7 @@ async function etagOf(config: BootstrapConfig): Promise<string> {
  * which the `bearer` plugin makes work with `Authorization: Bearer <token>`.
  *
  * Claude Desktop contract:
- *   - 200 + JSON body matching bootstrap-config-v2, or 401/403
+ *   - 200 + JSON body matching flat bootstrap-config-v1, or 401/403
  *   - Cache-Control: no-store (responses carry credentials)
  *   - Support If-None-Match / return 304 on unchanged config
  *   - Never respond with 3xx — Claude Desktop treats redirects as errors so a
@@ -46,6 +47,10 @@ export async function bootstrapHandler(
   const session = c.var.session ?? (await c.var.auth.api.getSession({ headers: c.req.raw.headers }).catch(() => null));
 
   if (!session) return c.json({ error: "invalid_token" }, 401);
+
+  if (!(await isEntitled(c.env.DB, session.user.id))) {
+    return c.json({ error: "not_entitled" }, 403);
+  }
 
   const config = await resolveUserProfile(c.env.DB, {
     gatewayBaseUrl: c.env.INFERENCE_GATEWAY_BASE_URL,

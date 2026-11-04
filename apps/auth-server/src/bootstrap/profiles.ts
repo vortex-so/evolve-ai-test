@@ -8,7 +8,6 @@ type ProfileContext = {
   user: {
     id: string;
     email: string;
-    // Populate from your directory; wire this in resolveUserRoles().
     roles?: string[];
   };
 };
@@ -19,8 +18,7 @@ type ProfileContext = {
  */
 function baseConfig({ gatewayBaseUrl, user }: ProfileContext): BootstrapConfig {
   return {
-    $schema:
-      "https://claude.com/docs/third-party/claude-desktop/schemas/bootstrap-config-v2.schema.json",
+    $schemaVersion: 1,
     inferenceProvider: "gateway",
     inferenceGatewayBaseUrl: gatewayBaseUrl,
     inferenceGatewayAuthScheme: "bearer",
@@ -29,14 +27,14 @@ function baseConfig({ gatewayBaseUrl, user }: ProfileContext): BootstrapConfig {
     inferenceCredentialKind: "interactive",
     inferenceModels: [
       { name: "claude-sonnet-5", anthropicFamilyTier: "sonnet", isFamilyDefault: true },
-      { name: "claude-haiku-5", anthropicFamilyTier: "haiku" },
+      { name: "claude-haiku-4-5", anthropicFamilyTier: "haiku", isFamilyDefault: true },
     ],
     otlpResourceAttributes: {
       "user.id": user.id,
       "user.email": user.email,
     },
-    // Cache for 1 hour. Claude Desktop re-polls every 30 min with If-None-Match
-    // regardless, so short expiries mostly hurt server load.
+    // Cache for 1 hour. Claude Desktop re-checks every 10 minutes by default
+    // (configRecheckIntervalMinutes supports 2-30) with If-None-Match.
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
   };
 }
@@ -46,9 +44,12 @@ function mergeDynamicFields(
   ctx: ProfileContext,
 ): BootstrapConfig {
   const base = baseConfig(ctx);
+  const servedConfig = { ...config };
+  delete servedConfig.$schema;
+
   return {
-    ...config,
-    $schema: config.$schema ?? base.$schema,
+    ...servedConfig,
+    $schemaVersion: 1,
     inferenceGatewayBaseUrl: base.inferenceGatewayBaseUrl,
     expiresAt: base.expiresAt,
     otlpResourceAttributes: {
@@ -81,16 +82,7 @@ export function selectProfile(ctx: ProfileContext): BootstrapConfig {
   return base;
 }
 
-/**
- * Return the set of Claude Desktop entitlements for this user. Empty array
- * means the caller is authenticated but not entitled — the endpoint responds
- * with 403.
- *
- * Wire this to your directory (Entra `roles`/`groups`, Okta `groups`, your own
- * `user_role` table) as needed. For a bare Better Auth deployment where every
- * signed-in user should get the default profile, return `["cowork-user"]`.
- */
-export function resolveUserRoles(_userId: string): string[] {
+export function resolveFallbackRoles(_userId: string): string[] {
   return ["cowork-user"];
 }
 
@@ -126,22 +118,26 @@ export async function resolveUserProfile(
         .catch(() => null);
 
   if (selected?.config) {
+    let parsed: unknown = null;
     try {
-      const parsed = JSON.parse(selected.config) as unknown;
-      if (parsed && typeof parsed === "object" && Object.keys(parsed as Record<string, unknown>).length > 0) {
-        const validation = validateBootstrapConfig(parsed);
-        if (validation.ok) {
-          return mergeDynamicFields(validation.data, ctx);
-        }
+      parsed = JSON.parse(selected.config) as unknown;
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed && typeof parsed === "object" && Object.keys(parsed as Record<string, unknown>).length > 0) {
+      const validation = validateBootstrapConfig(parsed);
+      if (validation.ok) {
+        return mergeDynamicFields(validation.data, ctx);
       }
-    } catch {}
+    }
   }
 
   return selectProfile({
     ...ctx,
     user: {
       ...ctx.user,
-      roles: resolveUserRoles(userId),
+      roles: resolveFallbackRoles(userId),
     },
   });
 }

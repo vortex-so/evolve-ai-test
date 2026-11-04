@@ -59,6 +59,60 @@ describe("bootstrap profile validation", () => {
     expect(auditInsertCount(DB.statements)).toBe(1);
   });
 
+  it("accepts a new official flat v1 key", async () => {
+    const { response, DB } = await requestApp("/admin/bootstrap/profiles", {
+      method: "POST",
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      body: {
+        name: "desktop-home-profile",
+        config: {
+          inferenceProvider: "gateway",
+          desktopHome: "standard",
+        },
+      },
+      plans: [{ match: /INSERT\s+INTO\s+bootstrap_profile/i, run: { meta: { changes: 1 } } }],
+    });
+
+    expect(response.status).toBe(200);
+    expect(
+      DB.statements.some(({ sql }) => /INSERT\s+INTO\s+bootstrap_profile/i.test(sql)),
+      "an official flat v1 key must pass validation and be persisted",
+    ).toBe(true);
+    expect(auditInsertCount(DB.statements)).toBe(1);
+  });
+
+  it("rejects out-of-range and unknown keys with leaf error paths", async () => {
+    const { response, DB } = await requestApp("/admin/bootstrap/profiles", {
+      method: "POST",
+      origin: TEST_CONSOLE_ORIGIN,
+      session: adminSession(),
+      body: {
+        name: "invalid-official-profile",
+        config: {
+          inferenceProvider: "gateway",
+          configRecheckIntervalMinutes: 99,
+          unknownManagedKey: true,
+        },
+      },
+    });
+    const body = (await readJson(response)) as {
+      code?: string;
+      errors?: Array<{ path: string; message: string }>;
+    } | null;
+    const paths = body?.errors?.map(({ path }) => path) ?? [];
+
+    expect(response.status).toBe(400);
+    expect(body?.code).toBe("invalid_bootstrap_config");
+    expect(paths).toContain("configRecheckIntervalMinutes");
+    expect(paths).toContain("unknownManagedKey");
+    expect(
+      DB.statements.some(({ sql }) => /INSERT\s+INTO\s+bootstrap_profile/i.test(sql)),
+      "invalid official-schema values must not be persisted",
+    ).toBe(false);
+    expect(auditInsertCount(DB.statements)).toBe(1);
+  });
+
   it("rejects invalid bootstrap profile config on patch without updating D1 state and audits failure", async () => {
     const { response, DB } = await requestApp("/admin/bootstrap/profiles/profile-1", {
       method: "PATCH",
