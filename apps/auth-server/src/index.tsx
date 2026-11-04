@@ -16,6 +16,12 @@ import {
 import { logAuditWriteFailure, writeAudit, type AuditWriteInput } from "./lib/audit";
 import { AdminGuardError, banSelfGuard, detectGuardFailure } from "./lib/admin-invariants";
 import { createAdminRoutes } from "./routes/admin";
+import { createGatewayRoutes } from "./gateway/routes";
+import { isEntitled } from "./lib/entitlement";
+import { createRefreshTokenService } from "./lib/refresh-token";
+import { createOAuthTokenHandler } from "./oauth/token";
+import { getStoredKeyAlias } from "./lib/key-store";
+import { createLitellmClient } from "./lib/litellm";
 
 const app = new Hono<AdminApp>();
 
@@ -77,6 +83,8 @@ app.use("*", async (c, next) => {
     } catch {
       c.set("session", null);
     }
+  } else if (c.req.path.startsWith("/v1/") || c.req.path === "/device") {
+    c.set("session", null);
   } else {
     const session = await c.get("auth").api.getSession({ headers: c.req.raw.headers }).catch(() => null);
     c.set("session", session);
@@ -92,14 +100,42 @@ app.onError((err, c) => {
 });
 
 app.get("/.well-known/oauth-authorization-server", (c) => c.json(buildDiscoveryMetadata(c.env.PUBLIC_ORIGIN)));
-app.get("/v1/.well-known/oauth-authorization-server", (c) =>
-  c.json(buildDiscoveryMetadata(c.env.PUBLIC_ORIGIN, "/v1")),
-);
 
 app.post("/oauth/device", async (c) => c.var.auth.handler(await formToJson(c.req.raw, "/api/auth/device/code")));
-app.post("/oauth/token", async (c) => c.var.auth.handler(await formToJson(c.req.raw, "/api/auth/device/token")));
-app.post("/v1/oauth/device", async (c) => c.var.auth.handler(await formToJson(c.req.raw, "/api/auth/device/code")));
-app.post("/v1/oauth/token", async (c) => c.var.auth.handler(await formToJson(c.req.raw, "/api/auth/device/token")));
+app.post("/oauth/token", async (c) => {
+  const internalAdapter = (await c.var.auth.$context).internalAdapter;
+  const refreshService = createRefreshTokenService({
+    db: c.env.DB,
+    sessions: {
+      async createSession(userId) {
+        const session = await internalAdapter.createSession(userId);
+        return {
+          id: session.id,
+          token: session.token,
+          expiresAt: session.expiresAt,
+        };
+      },
+      deleteSession: (token) => internalAdapter.deleteSession(token),
+    },
+    isEntitled: (userId) => isEntitled(c.env.DB, userId),
+  });
+  return createOAuthTokenHandler({
+    authHandler: (request) => c.var.auth.handler(request),
+    refreshService,
+  })(c.req.raw);
+});
+
+app.get("/device", (c) => {
+  const redirect = new URL("/auth/device", c.env.AUTH_WEB_ORIGIN);
+  const userCode = c.req.query("user_code");
+  if (userCode && /^[A-Za-z0-9-]{4,32}$/.test(userCode)) {
+    redirect.searchParams.set("user_code", userCode);
+  }
+  c.header("cache-control", "no-store");
+  return c.redirect(redirect.toString(), 302);
+});
+
+app.route("/v1", createGatewayRoutes());
 
 app.get("/user/bootstrap", (c) => bootstrapHandler(c));
 
@@ -329,6 +365,8 @@ async function handleRemoveUser(
     return adminJsonError("invalid_request", 400);
   }
 
+  const storedKeyAlias = await getStoredKeyAlias(c.env.DB, targetUserId);
+
   const result = await c.env.DB.prepare(
     `DELETE FROM user WHERE id = ?
       AND (
@@ -363,6 +401,19 @@ async function handleRemoveUser(
   });
   if (auditFailure) {
     return auditFailure;
+  }
+  if (storedKeyAlias) {
+    try {
+      await createLitellmClient({
+        baseUrl: c.env.LITELLM_BASE_URL,
+        adminKey: c.env.LITELLM_ADMIN_KEY,
+      }).deleteKeysByAlias([storedKeyAlias]);
+    } catch (error) {
+      console.error("LiteLLM key cleanup after user removal failed", {
+        userId: targetUserId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   }
   return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
 }

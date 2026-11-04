@@ -12,6 +12,9 @@ export type Env = {
   NODE_ENV: string;
   PUBLIC_ORIGIN: string;
   INFERENCE_GATEWAY_BASE_URL: string;
+  LITELLM_BASE_URL: string;
+  LITELLM_ADMIN_KEY: string;
+  AUTH_WEB_ORIGIN: string;
   POSTMARK_SERVER_TOKEN: string;
   POSTMARK_FROM: string;
   PRODUCT_NAME: string;
@@ -119,6 +122,7 @@ export function createAuth(env: Env) {
       }),
 
       deviceAuthorization({
+        verificationUri: "/device",
         interval: "5s",
         expiresIn: "10m",
       }),

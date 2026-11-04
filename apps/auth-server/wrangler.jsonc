@@ -8,7 +8,9 @@
   "vars": {
     "NODE_ENV": "production",
     "PUBLIC_ORIGIN": "https://api.auth-dev.vortex.so",
-    "INFERENCE_GATEWAY_BASE_URL": "https://api.auth-dev.vortex.so/v1",
+    "INFERENCE_GATEWAY_BASE_URL": "https://api.auth-dev.vortex.so",
+    "LITELLM_BASE_URL": "https://llm-manager.fly.dev",
+    "AUTH_WEB_ORIGIN": "https://auth.auth-dev.vortex.so",
     "PRODUCT_NAME": "Vortex Auth",
     "PRODUCT_URL": "https://auth.auth-dev.vortex.so"
   },

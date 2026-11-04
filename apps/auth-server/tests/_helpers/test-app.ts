@@ -1,4 +1,5 @@
 import { expect } from "vitest";
+import type { Env } from "../../src/auth";
 import app from "../../src/index";
 
 export const TEST_PUBLIC_ORIGIN = "https://api.auth-dev.vortex.so";
@@ -16,7 +17,7 @@ export type TestSession = {
   } | null;
 };
 
-type StatementPlan = {
+export type StatementPlan = {
   match: RegExp | string;
   first?: unknown;
   all?: unknown[];
@@ -96,7 +97,7 @@ export function createTestEnv(plans: StatementPlan[] = []) {
   return {
     DB,
     env: {
-      DB: DB as unknown as D1Database,
+      DB: DB as unknown as Env["DB"],
       AUTH_KV: {
         get: async () => null,
         put: async () => undefined,
@@ -104,11 +105,14 @@ export function createTestEnv(plans: StatementPlan[] = []) {
         list: async () => ({ keys: [], list_complete: true, cursor: "" }),
         getWithMetadata: async () => ({ value: null, metadata: null }),
         consume: async () => ({ success: true }),
-      } as unknown as KVNamespace,
+      } as unknown as Env["AUTH_KV"],
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret",
       NODE_ENV: "test",
       PUBLIC_ORIGIN: TEST_PUBLIC_ORIGIN,
       INFERENCE_GATEWAY_BASE_URL: TEST_PUBLIC_ORIGIN,
+      LITELLM_BASE_URL: "https://llm-manager.example.test",
+      LITELLM_ADMIN_KEY: "test-litellm-admin-key",
+      AUTH_WEB_ORIGIN: "https://auth.auth-dev.vortex.so",
       POSTMARK_SERVER_TOKEN: "test-postmark-token",
       POSTMARK_FROM: "noreply@auth-dev.vortex.so",
       PRODUCT_NAME: "Vortex Auth",
@@ -146,6 +150,7 @@ export async function requestApp(
   options: {
     method?: string;
     body?: unknown;
+    rawBody?: BodyInit;
     headers?: HeadersInit;
     origin?: string | null;
     session?: TestSession | null;
@@ -163,7 +168,9 @@ export async function requestApp(
   }
 
   let body: BodyInit | undefined;
-  if (options.body !== undefined) {
+  if (options.rawBody !== undefined) {
+    body = options.rawBody;
+  } else if (options.body !== undefined) {
     headers.set("content-type", "application/json");
     body = JSON.stringify(options.body);
   }
