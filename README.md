@@ -89,7 +89,7 @@ pnpm --filter @vortex/schema test
 ```
 
 Remote D1 migrations are checked in at `apps/auth-server/drizzle/0001` through
-`0004`. Apply them before deploying code that depends on them.
+`0005`. Apply them before deploying code that depends on them.
 
 ## Worker configuration
 
