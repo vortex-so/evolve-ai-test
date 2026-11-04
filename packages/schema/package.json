@@ -12,9 +12,15 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "update-schema": "node scripts/update-schema.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.4"
   }
 }

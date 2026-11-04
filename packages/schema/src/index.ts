@@ -7,10 +7,23 @@
 
 export type BootstrapConfig = {
   $schema?: string;
-  inferenceProvider: "gateway" | "anthropic" | "bedrock" | "vertex" | "foundry";
+  $schemaVersion?: 1;
+  inferenceProvider:
+    | "gateway"
+    | "anthropic"
+    | "bedrock"
+    | "mantle"
+    | "vertex"
+    | "foundry";
   inferenceGatewayBaseUrl?: string;
   inferenceGatewayAuthScheme?: "bearer" | "x-api-key";
-  inferenceCredentialKind?: "static" | "interactive" | "oauth" | "workforce";
+  inferenceCredentialKind?:
+    | "static"
+    | "helper-script"
+    | "interactive"
+    | "vendor-profile"
+    | "workforce"
+    | "external-idp";
   inferenceModels?: Array<
     | string
     | {
@@ -20,6 +33,8 @@ export type BootstrapConfig = {
         prefer1m?: boolean;
         anthropicFamilyTier?: "sonnet" | "opus" | "haiku" | "fable" | "mythos";
         isFamilyDefault?: boolean;
+        behavesAs?: string;
+        maxEffort?: "low" | "medium" | "high" | "xhigh" | "max";
       }
   >;
   coworkEgressAllowedHosts?: string[];
@@ -33,4 +48,7 @@ export type BootstrapConfig = {
   otlpResourceAttributes?: Record<string, string>;
   /** Unix epoch (seconds or ms; >= 1e12 read as ms). Client caches until this instant. */
   expiresAt?: number;
+  [key: string]: unknown;
 };
+
+export * from "./validate";
