@@ -91,28 +91,34 @@ export async function getOrProvisionUserKey(
     keyAlias: alias,
     metadata: metadata(user.id),
   });
-  const sealed = await encryptSecret(deps.secret, user.id, generated.key);
-  const timestamp = (deps.now ?? Date.now)();
-  const insertResult = await deps.db
-    .prepare(
-      `INSERT INTO litellm_user_key (
-        user_id, litellm_user_id, key_alias, token_id, key_ciphertext, key_iv,
-        key_wrap_version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id) DO NOTHING`,
-    )
-    .bind(
-      user.id,
-      litellmUserId,
-      alias,
-      generated.tokenId,
-      sealed.ciphertext,
-      sealed.iv,
-      1,
-      timestamp,
-      timestamp,
-    )
-    .run();
+  let insertResult: D1Result;
+  try {
+    const sealed = await encryptSecret(deps.secret, user.id, generated.key);
+    const timestamp = (deps.now ?? Date.now)();
+    insertResult = await deps.db
+      .prepare(
+        `INSERT INTO litellm_user_key (
+          user_id, litellm_user_id, key_alias, token_id, key_ciphertext, key_iv,
+          key_wrap_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO NOTHING`,
+      )
+      .bind(
+        user.id,
+        litellmUserId,
+        alias,
+        generated.tokenId,
+        sealed.ciphertext,
+        sealed.iv,
+        1,
+        timestamp,
+        timestamp,
+      )
+      .run();
+  } catch (error) {
+    await deleteKeyAliasBestEffort(deps.litellm, alias, user.id);
+    throw error;
+  }
 
   if (insertResult.meta.changes !== 0) return generated.key;
 

@@ -260,6 +260,17 @@ describe("key store", () => {
     expect(litellm.generateKey).toHaveBeenCalledTimes(1);
   });
 
+  it("deletes the freshly generated LiteLLM key when storing it fails", async () => {
+    const db = new KeyStoreD1();
+    const litellm = createLitellmFake();
+    const deps = { ...createDeps(db, litellm.client), secret: "" };
+
+    await expect(getOrProvisionUserKey(deps, USER)).rejects.toThrow();
+    expect(litellm.generateKey).toHaveBeenCalledTimes(1);
+    expect(litellm.deleteKeysByAlias).toHaveBeenCalledWith(["vortex-sso:user-1:nonce123"]);
+    expect(db.row).toBeFalsy();
+  });
+
   it("race: losing insert deletes its own key and returns the winner's key", async () => {
     const db = new KeyStoreD1();
     db.forceNextInsertChangesZero = true;
