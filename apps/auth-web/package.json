@@ -10,7 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "preview": "next build && wrangler dev",
-    "deploy": "next build && wrangler deploy"
+    "deploy": "next build && wrangler deploy --autoconfig=false"
   },
   "dependencies": {
     "@better-auth-ui/core": "^1.6.43",
