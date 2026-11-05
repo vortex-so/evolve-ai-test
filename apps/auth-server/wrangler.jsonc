@@ -27,6 +27,10 @@
     {
       "binding": "AUTH_KV",
       "id": "1f449179a4b540829cd8a3211c3a087e"
+    },
+    {
+      "binding": "PLUGINS_KV",
+      "id": "028c489785f540c9b929ee1d7e93f01d"
     }
   ]
 }

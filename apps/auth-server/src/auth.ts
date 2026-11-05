@@ -10,6 +10,7 @@ const INSECURE_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
 export type Env = {
   DB: D1Database;
   AUTH_KV: KVNamespace;
+  PLUGINS_KV: KVNamespace;
   BETTER_AUTH_SECRET: string;
   BETTER_AUTH_SECRET_PREVIOUS?: string;
   NODE_ENV: string;
@@ -21,6 +22,7 @@ export type Env = {
   /** AES key-wrap secret for stored per-user LiteLLM keys; falls back to BETTER_AUTH_SECRET. */
   LITELLM_KEY_ENCRYPTION_SECRET?: string;
   MCP_TOKEN_SECRET?: string;
+  MARKETPLACE_PUBLISH_TOKEN?: string;
   AUTH_WEB_ORIGIN: string;
   POSTMARK_SERVER_TOKEN: string;
   POSTMARK_FROM: string;

@@ -18,6 +18,7 @@ import { AdminGuardError, banSelfGuard, detectGuardFailure } from "./lib/admin-i
 import { createAdminRoutes } from "./routes/admin";
 import { createGatewayRoutes } from "./gateway/routes";
 import { mcpGatewayHandler } from "./gateway/mcp-routes";
+import { createPluginMarketplaceRoutes } from "./plugins/routes";
 import { isAdminRole, isEntitled } from "./lib/entitlement";
 import { createRefreshTokenService } from "./lib/refresh-token";
 import { createOAuthTokenHandler } from "./oauth/token";
@@ -96,7 +97,12 @@ app.use("*", async (c, next) => {
     } catch {
       c.set("session", null);
     }
-  } else if (c.req.path.startsWith("/v1/") || c.req.path.startsWith("/mcp/") || c.req.path === "/device") {
+  } else if (
+    c.req.path.startsWith("/v1/")
+    || c.req.path.startsWith("/mcp/")
+    || c.req.path.startsWith("/claude/plugins/")
+    || c.req.path === "/device"
+  ) {
     c.set("session", null);
   } else {
     const session = await c.get("auth").api.getSession({ headers: c.req.raw.headers }).catch(() => null);
@@ -150,6 +156,7 @@ app.get("/device", (c) => {
 
 app.route("/v1", createGatewayRoutes());
 app.all("/mcp/:server", mcpGatewayHandler);
+app.route("/claude/plugins", createPluginMarketplaceRoutes());
 
 app.get("/user/bootstrap", (c) => bootstrapHandler(c));
 
