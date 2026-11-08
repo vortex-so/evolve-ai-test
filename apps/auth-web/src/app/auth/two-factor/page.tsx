@@ -17,11 +17,12 @@ import { Input } from "@vortex/ui/components/input";
 import { Label } from "@vortex/ui/components/label";
 
 import { authClient } from "@/lib/auth-client";
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 export default function TwoFactorPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const redirect = params.get("redirect") ?? "/settings/account";
+  const redirectTo = safeRedirectTarget(params.get("redirectTo") ?? "/settings/account");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,7 @@ export default function TwoFactorPage() {
       return;
     }
     toast.success("Signed in");
-    router.push(redirect);
+    router.push(redirectTo);
   }
 
   async function sendOtp() {

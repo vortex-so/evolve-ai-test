@@ -11,23 +11,7 @@ import { AuthProvider } from "@vortex/ui/components/auth/auth-provider";
 
 import { authClient } from "@/lib/auth-client";
 import { getQueryClient } from "@/lib/query-client";
-
-const TRUSTED_REDIRECT_HOSTS = new Set([
-  "auth.auth-dev.vortex.so",
-  "console.auth-dev.vortex.so",
-]);
-
-function safeRedirectTarget(raw: string | null | undefined): string {
-  if (!raw) return "/";
-  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
-  try {
-    const url = new URL(raw);
-    if (url.protocol === "https:" && TRUSTED_REDIRECT_HOSTS.has(url.host)) {
-      return url.toString();
-    }
-  } catch {}
-  return "/";
-}
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 function ProvidersInner({ children }: { children: ReactNode }) {
   const queryClient = getQueryClient();
