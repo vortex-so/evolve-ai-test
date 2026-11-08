@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import {
+  AUTH_API_ORIGIN,
   AUTH_ORIGIN,
   NON_ADMIN_EMAIL,
+  POSTMARK_SERVER_TOKEN,
   postmarkAvailable,
   waitForRecentMessage,
 } from "./helpers";
@@ -61,5 +63,31 @@ test.describe("auth-web forgot-password", () => {
       sinceMs: start - 10_000,
     });
     expect(msg.Subject).toMatch(/reset/i);
+
+    let emailBody = "";
+    await expect
+      .poll(
+        async () => {
+          const details = await request.get(
+            `https://api.postmarkapp.com/messages/outbound/${msg.MessageID}/details`,
+            { headers: { Accept: "application/json", "X-Postmark-Server-Token": POSTMARK_SERVER_TOKEN } },
+          );
+          if (!details.ok()) return `details HTTP ${details.status()}`;
+          const { TextBody, HtmlBody } = (await details.json()) as { TextBody?: string; HtmlBody?: string };
+          emailBody = `${TextBody ?? ""} ${HtmlBody ?? ""}`;
+          return "ok";
+        },
+        { timeout: 30_000, intervals: [2_000] },
+      )
+      .toBe("ok");
+    const link = emailBody.match(/https:\/\/[^\s"'<>]*reset-password[^\s"'<>]*/)?.[0];
+    expect(link, "reset link in the email").toBeTruthy();
+
+    const emailLink = await request.get(link!.replace(/&amp;/g, "&"), { maxRedirects: 0 });
+    expect(emailLink.status()).toBe(302);
+    const landing = new URL(emailLink.headers()["location"] ?? "", AUTH_API_ORIGIN);
+    expect(landing.origin).toBe(AUTH_ORIGIN);
+    expect(landing.pathname).toBe("/auth/reset-password");
+    expect(landing.searchParams.get("token")).toBeTruthy();
   });
 });

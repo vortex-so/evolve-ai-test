@@ -69,11 +69,10 @@ export function ForgotPassword({ className }: ForgotPasswordProps) {
     const formData = new FormData(e.currentTarget)
     requestPasswordReset({
       email: formData.get("email") as string,
-      redirectTo: getViewURL(
-        baseURL,
-        basePaths.auth,
-        viewPaths.auth.resetPassword
-      ),
+      redirectTo: new URL(
+        getViewURL(baseURL, basePaths.auth, viewPaths.auth.resetPassword),
+        window.location.origin
+      ).href,
       fetchOptions
     })
   }

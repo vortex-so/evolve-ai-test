@@ -99,7 +99,10 @@ export function VerifyEmail({ className }: VerifyEmailProps) {
                 onClick={() =>
                   sendVerificationEmail({
                     email,
-                    callbackURL: `${baseURL}${redirectTo}`
+                    callbackURL: new URL(
+                      `${baseURL}${redirectTo}`,
+                      window.location.origin
+                    ).href
                   })
                 }
               >
