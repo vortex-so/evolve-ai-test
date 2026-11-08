@@ -30,6 +30,7 @@ import {
   type AdminSessionItem,
   type AdminUserDetail,
 } from "@/lib/admin-types";
+import { OdooConnectionPanel } from "./odoo-connection-panel";
 
 type UserDetailProps = {
   user: AdminUserDetail;
@@ -164,12 +165,13 @@ export function UserDetail({ user }: UserDetailProps) {
       </div>
 
       <Tabs defaultValue="profile">
-        <TabsList>
+         <TabsList className="max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
           <TabsTrigger value="2fa">2FA</TabsTrigger>
           <TabsTrigger value="passkeys">Passkeys</TabsTrigger>
+          <TabsTrigger value="byok">BYOK</TabsTrigger>
           <TabsTrigger value="audit">Audit</TabsTrigger>
         </TabsList>
 
@@ -244,6 +246,10 @@ export function UserDetail({ user }: UserDetailProps) {
               />
             ))
           )}
+        </TabsContent>
+
+        <TabsContent value="byok">
+          <OdooConnectionPanel userId={user.id} />
         </TabsContent>
 
         <TabsContent value="audit" className="space-y-4">
