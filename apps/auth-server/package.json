@@ -6,12 +6,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --config wrangler.prod.jsonc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "better-auth generate --config ./src/auth.cli.ts --output ./drizzle/schema.sql --yes",
     "db:migrate:local": "wrangler d1 migrations apply evolve-ai-bootstrap-dev --local",
-    "db:migrate:remote": "wrangler d1 migrations apply evolve-ai-bootstrap-dev --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply evolve-ai-bootstrap-dev --remote",
+    "db:migrate:prod": "wrangler d1 migrations apply evolve-ai-bootstrap-prod --remote --config wrangler.prod.jsonc"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "^1.6.25",
