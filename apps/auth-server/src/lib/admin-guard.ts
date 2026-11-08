@@ -68,7 +68,9 @@ export function buildAuditContext(
 
 export const strictAdminOrigin: MiddlewareHandler<AdminApp> = async (c, next) => {
   const origin = c.req.header("origin");
-  if (origin !== ADMIN_CONSOLE_ORIGIN && origin !== ADMIN_CONSOLE_LOCAL_ORIGIN) {
+  const consoleOrigin = c.env.CONSOLE_ORIGIN ?? ADMIN_CONSOLE_ORIGIN;
+  const localOriginAllowed = c.env.NODE_ENV !== "production" && origin === ADMIN_CONSOLE_LOCAL_ORIGIN;
+  if (origin !== consoleOrigin && !localOriginAllowed) {
     return adminJsonError("origin_mismatch", 403);
   }
   await next();
