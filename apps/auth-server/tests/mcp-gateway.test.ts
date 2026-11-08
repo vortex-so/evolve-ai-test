@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptSecret } from "../src/lib/crypto";
+import { encryptByokCredential } from "../src/byok/crypto";
+import { verifyByokAssertion } from "../src/byok/identity";
 import { mintMcpToken } from "../src/lib/mcp-token";
 import {
   requestApp,
@@ -7,6 +9,8 @@ import {
   type StatementPlan,
   userSession,
 } from "./_helpers/test-app";
+import { generateByokTestKeys } from "./_helpers/byok-keys";
+import { NATIVE_ODOO_POLICY } from "./_helpers/byok-native";
 
 const MCP_SECRET = "test-mcp-token-secret-test-mcp-token-secret";
 const LITELLM_BASE_URL = "https://llm-manager.example.test";
@@ -314,6 +318,149 @@ describe("MCP gateway", () => {
   it("returns 404 for an invalid server name", async () => {
     const { response } = await mcpRequest({ path: "/mcp/bad.server" });
     expect(response.status).toBe(404);
+  });
+
+  it("always rejects the private odoo_test alias on the public gateway", async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    const { response, DB } = await mcpRequest({ path: "/mcp/odoo_test" });
+    expect(response.status).toBe(404);
+    expect(DB.statements).toHaveLength(0);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it.each(["odoo_prod", "odoo_prod_test"])("rejects direct use of configured transport alias %s", async (alias) => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    const { response, DB } = await mcpRequest({
+      path: `/mcp/${alias}`,
+      env: { ODOO_MCP_ALIAS: "odoo_prod", ODOO_TEST_MCP_ALIAS: "odoo_prod_test" },
+    });
+    expect(response.status).toBe(404);
+    expect(DB.statements).toHaveLength(0);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for malformed Odoo alias config without fetching upstream", async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    const { response } = await mcpRequest({
+      path: "/mcp/odoo",
+      env: { ODOO_MCP_ALIAS: "meta_ads_mcp" },
+    });
+    expect(response.status).toBe(503);
+    expect(upstream).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ error: "mcp_gateway_unavailable" });
+  });
+
+  it("leaves unrelated MCP paths unchanged when Odoo alias config is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => Response.json({ ok: true })));
+    const { response } = await mcpRequest({ env: { ODOO_MCP_ALIAS: "meta_ads_mcp" } });
+    expect(response.status).toBe(200);
+  });
+
+  it("injects a fresh signed Odoo identity only after profile and connection checks", async () => {
+    const { privateKey, publicKey } = await generateByokTestKeys();
+    const litellmSealed = await encryptSecret(
+      "test-secret-test-secret-test-secret",
+      `mcp:${USER.user.id}`,
+      USER_KEY,
+    );
+    const credential = await encryptByokCredential(
+      "test-byok-encryption-secret-with-entropy",
+      USER.user.id,
+      "conn-1",
+      4,
+      "odoo-key",
+    );
+    const requests: Request[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ ok: true });
+    }));
+    const { response } = await mcpRequest({
+      path: "/mcp/odoo",
+      headers: { "x-mcp-odoo-x-vortex-identity": "Bearer attacker-token" },
+      env: { BYOK_ASSERTION_PRIVATE_KEY: privateKey },
+      plans: [
+        { match: /SELECT version FROM mcp_token_version/i, first: null },
+        { match: /SELECT id, email FROM "user" WHERE id = \?/i, first: { id: USER.user.id, email: USER.user.email } },
+        entitledPlan(),
+        ...profilePlans([{ name: "odoo", transport: "http", url: `${TEST_PUBLIC_ORIGIN}/mcp/odoo` }]),
+        {
+          match: /SELECT key_ciphertext, key_iv, key_alias FROM litellm_user_mcp_key/i,
+          first: { key_ciphertext: litellmSealed.ciphertext, key_iv: litellmSealed.iv, key_alias: "mcp-alias" },
+        },
+        {
+          match: /SELECT \* FROM byok_connection WHERE user_id/i,
+          first: {
+            id: "conn-1", user_id: USER.user.id, provider: "odoo", base_url: "https://erp.vortex.so",
+            database_name: "vortex", login: USER.user.email, credential_ciphertext: credential.ciphertext,
+            credential_iv: credential.iv, enabled: 1, version: 4, tested_version: 4, tested_at: Date.now(),
+            test_status: "ok", odoo_uid: 17, policy_json: JSON.stringify(NATIVE_ODOO_POLICY), deleted_at: null,
+            mutation_nonce: "nonce", created_at: 1, updated_at: 2,
+          },
+        },
+      ],
+    });
+    expect(response.status).toBe(200);
+    const upstream = requests[0];
+    if (!upstream) throw new Error("Expected Odoo upstream request");
+    const identityHeader = upstream.headers.get("x-mcp-odoo-x-vortex-identity");
+    expect(identityHeader).not.toBe("Bearer attacker-token");
+    const identity = identityHeader?.replace(/^Bearer /, "");
+    if (!identity) throw new Error("Expected signed identity header");
+    await expect(verifyByokAssertion({
+      token: identity,
+      publicKeyPem: publicKey,
+      issuer: TEST_PUBLIC_ORIGIN,
+    })).resolves.toMatchObject({ sub: USER.user.id, connectionId: "conn-1", version: 4, purpose: "mcp", server: "odoo" });
+  });
+
+  it("routes logical Odoo through the configured production alias while JWT claims remain logical", async () => {
+    const { privateKey, publicKey } = await generateByokTestKeys();
+    const litellmSealed = await encryptSecret("test-secret-test-secret-test-secret", `mcp:${USER.user.id}`, USER_KEY);
+    const requests: Request[] = [];
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (input, init) => {
+      requests.push(new Request(input, init));
+      return Response.json({ ok: true });
+    }));
+    const { response } = await mcpRequest({
+      path: "/mcp/odoo",
+      headers: {
+        "x-mcp-odoo-x-vortex-identity": "Bearer logical-spoof",
+        "x-mcp-odoo_prod-x-vortex-identity": "Bearer alias-spoof",
+      },
+      env: {
+        BYOK_ASSERTION_PRIVATE_KEY: privateKey,
+        ODOO_MCP_ALIAS: "odoo_prod",
+        ODOO_TEST_MCP_ALIAS: "odoo_prod_test",
+      },
+      plans: [
+        { match: /SELECT version FROM mcp_token_version/i, first: null },
+        { match: /SELECT id, email FROM "user" WHERE id = \?/i, first: { id: USER.user.id, email: USER.user.email } },
+        entitledPlan(),
+        ...profilePlans([{ name: "odoo", transport: "http", url: `${TEST_PUBLIC_ORIGIN}/mcp/odoo` }]),
+        { match: /SELECT \* FROM byok_connection WHERE user_id/i, first: {
+          id: "conn-prod", user_id: USER.user.id, enabled: 1, version: 8, tested_version: 8,
+          test_status: "ok", policy_json: JSON.stringify(NATIVE_ODOO_POLICY), deleted_at: null,
+        } },
+        { match: /SELECT key_ciphertext, key_iv, key_alias FROM litellm_user_mcp_key/i, first: {
+          key_ciphertext: litellmSealed.ciphertext, key_iv: litellmSealed.iv, key_alias: "mcp-alias",
+        } },
+      ],
+    });
+    expect(response.status).toBe(200);
+    const upstream = requests[0];
+    if (!upstream) throw new Error("Expected production Odoo request");
+    expect(upstream.url).toBe(`${LITELLM_BASE_URL}/odoo_prod/mcp`);
+    expect(upstream.headers.get("x-mcp-odoo-x-vortex-identity")).toBeNull();
+    const header = upstream.headers.get("x-mcp-odoo_prod-x-vortex-identity");
+    expect(header).not.toBe("Bearer alias-spoof");
+    const token = header?.replace(/^Bearer /, "");
+    if (!token) throw new Error("Expected production signed identity");
+    await expect(verifyByokAssertion({ token, publicKeyPem: publicKey, issuer: TEST_PUBLIC_ORIGIN }))
+      .resolves.toMatchObject({ connectionId: "conn-prod", version: 8, server: "odoo", purpose: "mcp" });
   });
 
   it("proxies POST as an unbuffered stream with the MCP header allowlists", async () => {

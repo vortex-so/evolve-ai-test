@@ -169,6 +169,7 @@ export async function proxyMcpRequest(input: {
   server: string;
   userKey: string;
   fetch?: typeof fetch;
+  trustedParameterHeaders?: Record<string, string>;
 }): Promise<McpProxyResult> {
   const requestUrl = new URL(input.request.url);
   const upstreamUrl = `${input.baseUrl.replace(/\/+$/, "")}/${input.server}/mcp${requestUrl.search}`;
@@ -177,6 +178,10 @@ export async function proxyMcpRequest(input: {
     if (MCP_REQUEST_HEADERS_TO_FORWARD.has(name.toLowerCase())) headers.append(name, value);
   });
   headers.set("x-litellm-api-key", `Bearer ${input.userKey}`);
+  for (const [name, value] of Object.entries(input.trustedParameterHeaders ?? {})) {
+    if (!/^x-mcp-[a-z0-9_-]+$/i.test(name)) throw new Error("invalid trusted MCP parameter header");
+    headers.set(name, value);
+  }
 
   const hasBody = input.request.method !== "GET" && input.request.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = {
