@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vortex-odoo-adapter"
+version = "0.1.0"
+description = "Private policy adapter for the pinned erpipe Odoo MCP worker"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "httpx2==2.16.0",
+  "mcp==2.3.0",
+  "odoo-mcp @ git+https://github.com/erpipe-org/mcp-odoo.git@76ec136e0c89c414811a12629eb2903d2dc27357",
+  "PyJWT[crypto]==2.15.1",
+  "pydantic==2.14.3",
+  "uvicorn==0.54.0",
+]
+
+[dependency-groups]
+dev = [
+  "mypy==1.19.1",
+  "pytest==9.0.2",
+  "pytest-asyncio==1.3.0",
+  "ruff==0.14.10",
+]
+
+[project.scripts]
+vortex-odoo-adapter = "odoo_adapter.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/odoo_adapter"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["odoo_adapter"]
+
+[[tool.mypy.overrides]]
+module = ["odoo_mcp", "odoo_mcp.*"]
+ignore_missing_imports = true
