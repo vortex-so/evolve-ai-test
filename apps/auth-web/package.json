@@ -10,7 +10,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "preview": "next build && wrangler dev",
-    "deploy": "next build && wrangler deploy --autoconfig=false"
+    "deploy": "next build && wrangler deploy --autoconfig=false",
+    "deploy:prod": "NEXT_PUBLIC_AUTH_API_URL=https://api.internal.vortex.so NEXT_PUBLIC_CONSOLE_URL=https://console.internal.vortex.so next build && wrangler deploy --config wrangler.prod.jsonc --autoconfig=false"
   },
   "dependencies": {
     "@better-auth-ui/core": "^1.6.43",
