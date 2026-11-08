@@ -71,7 +71,7 @@ const storageState = {
 
 export default defineConfig({
   testDir: testsDir,
-  testMatch: "odoo-native.spec.ts",
+  testMatch: ["odoo-native.spec.ts", "bootstrap-assign.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: 0,

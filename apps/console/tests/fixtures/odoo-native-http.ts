@@ -22,6 +22,7 @@ type FixtureState = {
   connection: JsonRecord | null;
   lastPut: JsonRecord | null;
   nextTestResponse: TestResponse;
+  assignments: Record<string, string>;
   requests: CapturedRequest[];
 };
 
@@ -58,6 +59,43 @@ const targetUser = {
   twoFactor: [],
   passkeys: [],
 };
+
+function directoryUser(id: string, name: string, email: string): JsonRecord {
+  return { ...targetUser, id, name, email, role: "user", accounts: undefined, twoFactor: undefined, passkeys: undefined };
+}
+
+const directoryUsers = [
+  targetUser,
+  directoryUser("user-alice", "Alice Marketing", "alice@example.test"),
+  directoryUser("user-bob", "Bob Sales", "bob@example.test"),
+  directoryUser("user-carol", "Carol Locked", "carol@example.test"),
+];
+const FAILING_ASSIGNMENT_USER = "user-carol";
+
+const bootstrapProfiles = [
+  {
+    id: "default-cowork-user",
+    name: "cowork-user",
+    description: "Default profile",
+    config: { $schemaVersion: 1, inferenceProvider: "gateway" },
+    schema_version: 1,
+    is_default: 1,
+    is_system: 1,
+    created_at: FIXED_NOW,
+    updated_at: FIXED_NOW,
+  },
+  {
+    id: "marketing-prod",
+    name: "marketing",
+    description: "Growth team tools",
+    config: { $schemaVersion: 1, inferenceProvider: "gateway" },
+    schema_version: 1,
+    is_default: 0,
+    is_system: 0,
+    created_at: FIXED_NOW,
+    updated_at: FIXED_NOW,
+  },
+];
 
 function readMode(value: string | undefined): FixtureMode {
   if (!value || value === "legacy") return "legacy";
@@ -110,6 +148,7 @@ function freshState(): FixtureState {
     connection: initialConnection(),
     lastPut: null,
     nextTestResponse: { status: 200, error: "fixture_test_failed" },
+    assignments: { "user-bob": "marketing-prod" },
     requests: [],
   };
 }
@@ -344,6 +383,7 @@ function statePayload(): JsonRecord {
     connection: state.connection,
     lastPut: state.lastPut,
     nextTestResponse: state.nextTestResponse,
+    assignments: state.assignments,
     requests: state.requests,
     actionLog: ACTION_LOG,
   };
@@ -428,6 +468,52 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       next_cursor: null,
       total: 1,
     });
+    return;
+  }
+
+  if (url.pathname === "/api/auth/admin/list-users" && req.method === "GET") {
+    sendJson(req, res, url.pathname, 200, {
+      users: directoryUsers,
+      total: directoryUsers.length,
+      limit: Number(url.searchParams.get("limit") ?? 100),
+      offset: 0,
+    });
+    return;
+  }
+
+  if (url.pathname === "/admin/bootstrap/profiles" && req.method === "GET") {
+    sendJson(req, res, url.pathname, 200, { rows: bootstrapProfiles, items: bootstrapProfiles });
+    return;
+  }
+
+  const assignmentMatch = /^\/admin\/bootstrap\/assignments\/([^/]+)$/.exec(url.pathname);
+  if (assignmentMatch && req.method === "GET") {
+    const userId = decodeURIComponent(assignmentMatch[1]!);
+    const profileId = state.assignments[userId];
+    const profile = bootstrapProfiles.find((entry) => entry.id === profileId);
+    sendJson(req, res, url.pathname, 200, {
+      assignment: profile
+        ? { user_id: userId, profile_id: profile.id, profile_name: profile.name, assigned_by_user_id: ACTOR_ID }
+        : null,
+    });
+    return;
+  }
+
+  if (assignmentMatch && req.method === "PUT") {
+    const userId = decodeURIComponent(assignmentMatch[1]!);
+    const body = await readJson(req);
+    if (userId === FAILING_ASSIGNMENT_USER) {
+      sendJson(req, res, url.pathname, 500, { error: "fixture_assignment_failed" }, body);
+      return;
+    }
+    const known = directoryUsers.some((user) => user.id === userId);
+    const profile = bootstrapProfiles.find((entry) => entry.id === body.profile_id);
+    if (!known || !profile) {
+      sendJson(req, res, url.pathname, 400, { error: "invalid_request" }, body);
+      return;
+    }
+    state.assignments = { ...state.assignments, [userId]: profile.id };
+    sendJson(req, res, url.pathname, 200, { success: true }, body);
     return;
   }
 

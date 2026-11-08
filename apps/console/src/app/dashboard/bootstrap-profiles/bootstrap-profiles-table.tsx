@@ -16,6 +16,9 @@ import {
   DropdownMenuTrigger,
 } from "@vortex/ui/components/dropdown-menu";
 
+import { fetchJsonOrThrow } from "@/lib/admin-client";
+import { getErrorMessage, normalizeAdminUsersResponse, type AdminUser } from "@/lib/admin-types";
+
 import { AssignProfileDialog } from "./assign-profile-dialog";
 import { BootstrapProfileEditor } from "./bootstrap-profile-editor";
 
@@ -40,32 +43,6 @@ function formatDate(value: number): string {
   return new Date(value).toISOString();
 }
 
-function extractUserIds(payload: unknown): string[] {
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const candidates = [
-    (payload as { users?: unknown }).users,
-    (payload as { items?: unknown }).items,
-    (payload as { rows?: unknown }).rows,
-  ];
-
-  const users = candidates.find(Array.isArray);
-  if (!Array.isArray(users)) {
-    return [];
-  }
-
-  return users
-    .map((user) => {
-      if (user && typeof user === "object" && "id" in user && typeof user.id === "string") {
-        return user.id;
-      }
-      return null;
-    })
-    .filter((value): value is string => Boolean(value));
-}
-
 export function BootstrapProfilesTable({
   initialProfiles,
   initialError,
@@ -79,7 +56,11 @@ export function BootstrapProfilesTable({
   const [assignOpen, setAssignOpen] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState<BootstrapProfileRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [assignmentCounts, setAssignmentCounts] = useState<Record<string, number>>({});
+  const [directoryUsers, setDirectoryUsers] = useState<AdminUser[]>([]);
+  const [assignments, setAssignments] = useState<Record<string, string>>({});
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
+  const [assignmentsError, setAssignmentsError] = useState<string | undefined>();
+  const [assignmentsVersion, setAssignmentsVersion] = useState(0);
 
   async function refreshProfiles() {
     setLoading(true);
@@ -111,28 +92,19 @@ export function BootstrapProfilesTable({
   useEffect(() => {
     let cancelled = false;
 
-    async function loadAssignmentCounts() {
+    async function loadAssignments() {
+      setAssignmentsLoading(true);
       try {
-        const usersResponse = await fetch("/api/admin/users?limit=100", { cache: "no-store" });
-        if (!usersResponse.ok) {
-          return;
-        }
+        const users = normalizeAdminUsersResponse(
+          await fetchJsonOrThrow<unknown>("/api/admin/users?limit=100", { cache: "no-store" }),
+        ).items.filter((user) => user.id);
 
-        const usersPayload = (await usersResponse.json()) as unknown;
-        const userIds = extractUserIds(usersPayload);
-        if (userIds.length === 0) {
-          if (!cancelled) {
-            setAssignmentCounts({});
-          }
-          return;
-        }
-
-        const assignments = await Promise.all(
-          userIds.map(async (userId) => {
-            const response = await fetch(`/api/admin/bootstrap-assignments/${userId}`, {
-              cache: "no-store",
-            });
-
+        const entries = await Promise.all(
+          users.map(async (user) => {
+            const response = await fetch(
+              `/api/admin/bootstrap-assignments/${encodeURIComponent(user.id)}`,
+              { cache: "no-store" },
+            );
             if (!response.ok) {
               return null;
             }
@@ -140,8 +112,8 @@ export function BootstrapProfilesTable({
             const payload = (await response.json()) as {
               assignment?: { profile_id?: string | null } | null;
             };
-
-            return payload.assignment?.profile_id ?? null;
+            const profileId = payload.assignment?.profile_id;
+            return profileId ? ([user.id, profileId] as const) : null;
           }),
         );
 
@@ -149,27 +121,40 @@ export function BootstrapProfilesTable({
           return;
         }
 
-        const counts: Record<string, number> = {};
-        for (const profileId of assignments) {
-          if (!profileId) {
-            continue;
-          }
-          counts[profileId] = (counts[profileId] ?? 0) + 1;
-        }
-        setAssignmentCounts(counts);
-      } catch {
+        setDirectoryUsers(users);
+        setAssignments(
+          Object.fromEntries(
+            entries.filter((entry): entry is readonly [string, string] => entry !== null),
+          ),
+        );
+        setAssignmentsError(undefined);
+      } catch (loadError) {
         if (!cancelled) {
-          setAssignmentCounts({});
+          setDirectoryUsers([]);
+          setAssignments({});
+          setAssignmentsError(getErrorMessage(loadError, "Could not load users."));
+        }
+      } finally {
+        if (!cancelled) {
+          setAssignmentsLoading(false);
         }
       }
     }
 
-    void loadAssignmentCounts();
+    void loadAssignments();
 
     return () => {
       cancelled = true;
     };
-  }, [profiles]);
+  }, [profiles, assignmentsVersion]);
+
+  const assignmentCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const profileId of Object.values(assignments)) {
+      counts[profileId] = (counts[profileId] ?? 0) + 1;
+    }
+    return counts;
+  }, [assignments]);
 
   const columns = useMemo<ColumnDef<BootstrapProfileRecord>[]>(
     () => [
@@ -239,7 +224,7 @@ export function BootstrapProfilesTable({
                     setAssignOpen(true);
                   }}
                 >
-                  Assign to user
+                  Assign users
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={Boolean(profile.is_system)}
@@ -299,6 +284,12 @@ export function BootstrapProfilesTable({
         open={assignOpen}
         onOpenChange={setAssignOpen}
         profile={assignProfile}
+        profiles={profiles}
+        users={directoryUsers}
+        assignments={assignments}
+        loading={assignmentsLoading && directoryUsers.length === 0}
+        error={assignmentsError}
+        onAssigned={() => setAssignmentsVersion((version) => version + 1)}
       />
 
       <ConfirmDialog
