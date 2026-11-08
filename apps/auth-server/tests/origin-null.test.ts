@@ -33,4 +33,32 @@ describe("admin origin enforcement", () => {
 
     expect(response.status).toBe(200);
   });
+
+  it("accepts the configured production console origin and rejects a lookalike", async () => {
+    const productionEnv = {
+      CONSOLE_ORIGIN: "https://console.internal.vortex.so",
+      AUTH_WEB_ORIGIN: "https://auth.internal.vortex.so",
+      AUTH_COOKIE_DOMAIN: ".internal.vortex.so",
+    };
+
+    const accepted = await requestApp("/admin/audit", {
+      method: "GET",
+      origin: productionEnv.CONSOLE_ORIGIN,
+      session: adminSession(),
+      env: productionEnv,
+    });
+    expect(accepted.response.status).toBe(200);
+
+    const rejected = await requestApp("/admin/audit", {
+      method: "GET",
+      origin: "https://console.internal.vortex.so.evil.example",
+      session: adminSession(),
+      env: productionEnv,
+    });
+    expect(rejected.response.status).toBe(403);
+    expect(await rejected.response.json()).toEqual({
+      error: "origin_mismatch",
+      code: "origin_mismatch",
+    });
+  });
 });

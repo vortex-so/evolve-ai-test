@@ -10,6 +10,7 @@ const INSECURE_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
 export type Env = {
   DB: D1Database;
   AUTH_KV: KVNamespace;
+  PLUGINS_KV: KVNamespace;
   BETTER_AUTH_SECRET: string;
   BETTER_AUTH_SECRET_PREVIOUS?: string;
   NODE_ENV: string;
@@ -21,6 +22,17 @@ export type Env = {
   /** AES key-wrap secret for stored per-user LiteLLM keys; falls back to BETTER_AUTH_SECRET. */
   LITELLM_KEY_ENCRYPTION_SECRET?: string;
   MCP_TOKEN_SECRET?: string;
+  CONSOLE_ORIGIN?: string;
+  AUTH_COOKIE_DOMAIN?: string;
+  ODOO_BASE_URL?: string;
+  ODOO_MCP_ALIAS?: string;
+  ODOO_TEST_MCP_ALIAS?: string;
+  BYOK_ENCRYPTION_SECRET?: string;
+  BYOK_RUNTIME_TOKEN?: string;
+  BYOK_ASSERTION_PRIVATE_KEY?: string;
+  BYOK_ASSERTION_PUBLIC_KEY?: string;
+  BYOK_TEST_LITELLM_KEY?: string;
+  MARKETPLACE_PUBLISH_TOKEN?: string;
   AUTH_WEB_ORIGIN: string;
   POSTMARK_SERVER_TOKEN: string;
   POSTMARK_FROM: string;
@@ -109,9 +121,9 @@ export function createAuth(env: Env) {
 
     trustedOrigins: [
       env.PUBLIC_ORIGIN,
-      "https://auth.auth-dev.vortex.so",
-      "https://console.auth-dev.vortex.so",
-      "https://auth-web-dev.vortex-so.workers.dev",
+      env.AUTH_WEB_ORIGIN,
+      env.CONSOLE_ORIGIN ?? "https://console.auth-dev.vortex.so",
+      ...(env.NODE_ENV === "test" ? ["https://auth-web-dev.vortex-so.workers.dev"] : []),
     ],
 
     advanced: {
@@ -121,7 +133,7 @@ export function createAuth(env: Env) {
       },
       crossSubDomainCookies: {
         enabled: true,
-        domain: ".auth-dev.vortex.so",
+        domain: env.AUTH_COOKIE_DOMAIN ?? ".auth-dev.vortex.so",
       },
       defaultCookieAttributes: {
         sameSite: "lax",
@@ -150,8 +162,8 @@ export function createAuth(env: Env) {
 
       oauthProvider({
         scopes: ["openid", "profile", "email", "offline_access", "bootstrap:read"],
-        loginPage: "https://auth.auth-dev.vortex.so/auth/sign-in",
-        consentPage: "https://auth.auth-dev.vortex.so/auth/oauth-consent",
+        loginPage: `${env.AUTH_WEB_ORIGIN}/auth/sign-in`,
+        consentPage: `${env.AUTH_WEB_ORIGIN}/auth/oauth-consent`,
         allowDynamicClientRegistration: false,
         validAudiences: [env.PUBLIC_ORIGIN],
       }),

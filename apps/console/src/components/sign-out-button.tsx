@@ -7,7 +7,8 @@ import { Button } from "@vortex/ui/components/button";
 
 import { authClient } from "@/lib/auth-client";
 
-const AUTH_APP_ORIGIN = "https://auth.auth-dev.vortex.so";
+const AUTH_APP_ORIGIN =
+  process.env.NEXT_PUBLIC_AUTH_WEB_URL ?? "https://auth.auth-dev.vortex.so";
 
 export function SignOutButton() {
   const [pending, setPending] = useState(false);

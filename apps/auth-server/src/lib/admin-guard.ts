@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import type { Auth, Env } from "../auth";
 import { getActiveAdminStatus } from "./entitlement";
+import type { ByokAssertion } from "../byok/identity";
 
 export const ADMIN_CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
 export const ADMIN_CONSOLE_LOCAL_ORIGIN = "http://localhost:3001";
@@ -24,6 +25,7 @@ export type AdminApp = {
     session?: AdminSession | null;
     adminSession?: AdminSession;
     auditContext?: AuditContext;
+    byokAssertion?: ByokAssertion;
   };
 };
 
@@ -66,7 +68,9 @@ export function buildAuditContext(
 
 export const strictAdminOrigin: MiddlewareHandler<AdminApp> = async (c, next) => {
   const origin = c.req.header("origin");
-  if (origin !== ADMIN_CONSOLE_ORIGIN && origin !== ADMIN_CONSOLE_LOCAL_ORIGIN) {
+  const consoleOrigin = c.env.CONSOLE_ORIGIN ?? ADMIN_CONSOLE_ORIGIN;
+  const localOriginAllowed = c.env.NODE_ENV !== "production" && origin === ADMIN_CONSOLE_LOCAL_ORIGIN;
+  if (origin !== consoleOrigin && !localOriginAllowed) {
     return adminJsonError("origin_mismatch", 403);
   }
   await next();

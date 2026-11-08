@@ -11,6 +11,9 @@ import {
 } from "../lib/mcp-token";
 import { parseGatewayMcpUrl } from "../lib/mcp-url";
 import { mcpErrorResponse, proxyMcpRequest } from "./proxy";
+import { connectionPolicy, getConnectionByUser } from "../byok/db";
+import { mintByokAssertion } from "../byok/identity";
+import { resolveOdooAliases, type OdooAliases } from "../byok/routing";
 
 type McpContext = Context<AdminApp>;
 type UserRow = { id: string; email: string };
@@ -36,6 +39,20 @@ function profileAllowsServer(
 export async function mcpGatewayHandler(c: McpContext): Promise<Response> {
   const server = c.req.param("server") ?? "";
   if (!/^[a-z0-9_-]{1,64}$/i.test(server)) return c.notFound();
+  if (server === "odoo_test") return c.notFound();
+  let odooAliases: OdooAliases | null = null;
+  try {
+    odooAliases = resolveOdooAliases(c.env);
+  } catch {
+    if (server === "odoo") return mcpErrorResponse("mcp_gateway_unavailable", 503);
+  }
+  if (
+    odooAliases
+    && server !== "odoo"
+    && (server === odooAliases.normal || server === odooAliases.test)
+  ) {
+    return c.notFound();
+  }
   if (!MCP_METHODS.has(c.req.method)) {
     return new Response(null, { status: 405, headers: { allow: "POST, GET, DELETE" } });
   }
@@ -80,6 +97,41 @@ export async function mcpGatewayHandler(c: McpContext): Promise<Response> {
     return mcpErrorResponse("server_not_allowed", 403);
   }
 
+  let trustedParameterHeaders: Record<string, string> | undefined;
+  if (server === "odoo") {
+    if (!odooAliases) return mcpErrorResponse("mcp_gateway_unavailable", 503);
+    const connection = await getConnectionByUser(c.env.DB, user.id);
+    const privateKey = c.env.BYOK_ASSERTION_PRIVATE_KEY?.trim();
+    if (
+      !connection || connection.deleted_at !== null || connection.enabled !== 1
+      || connection.test_status !== "ok" || connection.tested_version !== connection.version
+      || !privateKey
+    ) {
+      return mcpErrorResponse("connection_unavailable", 403);
+    }
+    try {
+      connectionPolicy(connection);
+    } catch {
+      return mcpErrorResponse("connection_unavailable", 403);
+    }
+    try {
+      const identity = await mintByokAssertion({
+        privateKeyPem: privateKey,
+        issuer: c.env.PUBLIC_ORIGIN,
+        subject: user.id,
+        connectionId: connection.id,
+        version: connection.version,
+        purpose: "mcp",
+        server: "odoo",
+      });
+      trustedParameterHeaders = {
+        [`x-mcp-${odooAliases.normal}-x-vortex-identity`]: `Bearer ${identity}`,
+      };
+    } catch {
+      return mcpErrorResponse("mcp_gateway_unavailable", 503);
+    }
+  }
+
   const litellm = createLitellmClient({
     baseUrl: c.env.LITELLM_BASE_URL,
     adminKey: c.env.LITELLM_ADMIN_KEY,
@@ -103,11 +155,14 @@ export async function mcpGatewayHandler(c: McpContext): Promise<Response> {
     return mcpErrorResponse("upstream_unavailable", 502);
   }
 
+  const upstreamServer = server === "odoo" ? odooAliases?.normal : server;
+  if (!upstreamServer) return mcpErrorResponse("mcp_gateway_unavailable", 503);
   const result = await proxyMcpRequest({
     request: c.req.raw,
     baseUrl: c.env.LITELLM_BASE_URL,
-    server,
+    server: upstreamServer,
     userKey,
+    trustedParameterHeaders,
   });
   if (result.kind === "response") return result.response;
   if (result.kind === "network_error") {

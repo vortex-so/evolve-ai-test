@@ -7,6 +7,7 @@ inference authorization. Devices receive no LiteLLM credentials.
 
 Claude Desktop 1.10628.0 or later is required for bootstrap configuration.
 Silent token refresh while the app is running requires 1.34493.0 or later.
+The managed plugin marketplace requires Claude Desktop 1.32352.0 or later.
 
 ```text
 Claude Desktop
@@ -17,6 +18,7 @@ api.auth-dev.vortex.so  <---->  auth.auth-dev.vortex.so
   |                            sign-in and consent UI
   | /user/bootstrap
   | /v1/messages, /v1/messages/count_tokens, /v1/models
+  | /claude/plugins/marketplace.json, /claude/plugins/archives/*.zip
   v
 llm-manager.fly.dev
   LiteLLM proxy, using a server-held key owned by the signed-in user
@@ -49,6 +51,8 @@ The API Worker exposes:
 | `/v1/messages` | Streaming and non-streaming inference |
 | `/v1/messages/count_tokens` | Token counting |
 | `/v1/models` | Model discovery |
+| `/claude/plugins/marketplace.json` | Authenticated Vortex plugin marketplace manifest |
+| `/claude/plugins/archives/:file` | Authenticated immutable plugin archive download |
 
 The bootstrap URL and inference gateway share the API origin. This lets Claude
 Desktop reuse the same device-code sign-in for configuration and inference.
@@ -308,6 +312,72 @@ The route increments the user's token version and writes audit action
 `admin.mcp_token.rotate`. Existing tokens fail immediately; relaunch Claude
 Desktop after the next bootstrap refresh so it loads the newly injected token.
 
+## Plugin marketplace (skills)
+
+Vortex skills are distributed from the same API origin as bootstrap and
+inference. Claude Desktop sends its existing device-session credential as
+`Authorization: Bearer <token>` to both the marketplace manifest and every
+archive URL, so users do not complete a second sign-in.
+
+```text
+github.com/vortex-so/claude-marketplace
+  |
+  | release workflow: build ZIPs, calculate SHA-256, publish archives, publish manifest
+  v
+https://api.auth-dev.vortex.so/claude/plugins/_publish/*
+  |
+  | MARKETPLACE_PUBLISH_TOKEN (CI secret matched by Worker secret)
+  v
+Cloudflare KV (PLUGINS_KV)
+  |
+  | authenticated manifest and archive reads
+  v
+Claude Desktop
+```
+
+Add this entry to the managed profile's `allowedPluginMarketplaces` array:
+
+```json
+{
+  "source": "url",
+  "url": "https://api.auth-dev.vortex.so/claude/plugins/marketplace.json",
+  "credentialKind": "inferenceCredential",
+  "expectedName": "vortex-marketplace",
+  "installationPreference": "available"
+}
+```
+
+`credentialKind: "inferenceCredential"` makes Desktop reuse the same bearer
+credential it sends to `/v1`. The marketplace manifest itself may set an
+individual plugin's `installationPreference` to `"auto_install"`. That is
+allowed because this marketplace is served from the trusted bootstrap and
+gateway origin; the profile-level `"available"` value does not prevent those
+per-plugin automatic installations.
+
+Each archive is an immutable ZIP containing `.claude-plugin/plugin.json` at
+the ZIP root or under one wrapping directory. Skills that invoke scripts run
+inside Claude Cowork or Claude Code. MCP server declarations are stripped from
+the Claude Desktop plugin build; MCP servers belong in bootstrap profiles under
+`managedMcpServers`, where Vortex can apply per-user gateway authorization.
+
+Publishing is CI-only. Generate one random value of at least 32 characters and
+set the same value in both locations:
+
+```bash
+# Cloudflare Worker secret (run from apps/auth-server)
+pnpm exec wrangler secret put MARKETPLACE_PUBLISH_TOKEN
+
+# GitHub Actions secret in vortex-so/claude-marketplace
+gh secret set MARKETPLACE_PUBLISH_TOKEN --repo vortex-so/claude-marketplace
+```
+
+The release workflow uploads each archive with `x-content-sha256` and an exact
+`Content-Length`, then uploads the manifest with its exact `Content-Length`
+only after every referenced archive exists with matching KV metadata. Archives
+are limited to 24 MiB and manifest bodies to 1 MiB. Archive downloads stream
+directly from KV using the stored size metadata; neither the manifest nor
+archive download endpoints redirect or cache user-specific responses.
+
 ## Operating the service
 
 ### Configuration
@@ -329,6 +399,7 @@ Set these as Worker secrets:
 | `BETTER_AUTH_SECRET` | Better Auth signing secret (must be non-empty, 32+ random characters) |
 | `LITELLM_KEY_ENCRYPTION_SECRET` | Input key material for encrypting stored per-user LiteLLM keys (32+ random characters) |
 | `MCP_TOKEN_SECRET` | HMAC secret for stable per-user MCP gateway tokens (32+ random characters; no fallback) |
+| `MARKETPLACE_PUBLISH_TOKEN` | CI-only bearer token for publishing plugin archives and manifests (32+ random characters; no fallback) |
 | `LITELLM_ADMIN_KEY` | LiteLLM proxy-admin key (can create users and keys) |
 | `POSTMARK_*` | Postmark credentials and sender settings used by the auth flow |
 

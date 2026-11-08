@@ -52,3 +52,4 @@ export type BootstrapConfig = {
 };
 
 export * from "./validate";
+export * from "./byok";

@@ -18,30 +18,39 @@ import { AdminGuardError, banSelfGuard, detectGuardFailure } from "./lib/admin-i
 import { createAdminRoutes } from "./routes/admin";
 import { createGatewayRoutes } from "./gateway/routes";
 import { mcpGatewayHandler } from "./gateway/mcp-routes";
+import { createPluginMarketplaceRoutes } from "./plugins/routes";
 import { isAdminRole, isEntitled } from "./lib/entitlement";
 import { createRefreshTokenService } from "./lib/refresh-token";
 import { createOAuthTokenHandler } from "./oauth/token";
 import { getStoredKeyAlias } from "./lib/key-store";
 import { createLitellmClient } from "./lib/litellm";
+import { createByokAdminRoutes } from "./byok/admin-routes";
+import { createByokInternalRoutes } from "./byok/internal-routes";
+import { requireByokInternalAuth } from "./byok/internal-auth";
 
 const app = new Hono<AdminApp>();
 
-const ALLOWED_ORIGINS = [
-  "https://auth.auth-dev.vortex.so",
-  ADMIN_CONSOLE_ORIGIN,
-  "https://vortex-auth-web-dev.vortex-so.workers.dev",
+const TEST_ORIGINS = [
   "http://localhost:3000",
   ADMIN_CONSOLE_LOCAL_ORIGIN,
+  "https://vortex-auth-web-dev.vortex-so.workers.dev",
 ];
 
-const corsOptions = {
-  origin: (origin: string | undefined) => (ALLOWED_ORIGINS.includes(origin ?? "") ? origin : null),
+function corsOptions(env: Env) {
+  const allowedOrigins = [
+    env.AUTH_WEB_ORIGIN,
+    env.CONSOLE_ORIGIN ?? ADMIN_CONSOLE_ORIGIN,
+    ...(env.NODE_ENV === "test" ? TEST_ORIGINS : []),
+  ];
+  return {
+    origin: (origin: string | undefined) => (allowedOrigins.includes(origin ?? "") ? origin : null),
   credentials: true,
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowHeaders: ["content-type", "authorization", "x-requested-with"],
   exposeHeaders: ["set-auth-token", "x-retry-after"],
   maxAge: 600,
-};
+  };
+}
 
 type AdminContext = Context<AdminApp>;
 
@@ -74,8 +83,8 @@ async function revokeUserSessions(c: AdminContext, userId: string): Promise<void
   }
 }
 
-app.use("/api/auth/*", cors(corsOptions));
-app.use("/admin/*", cors(corsOptions));
+app.use("/api/auth/*", async (c, next) => cors(corsOptions(c.env))(c, next));
+app.use("/admin/*", async (c, next) => cors(corsOptions(c.env))(c, next));
 
 app.use("*", async (c, next) => {
   try {
@@ -96,7 +105,13 @@ app.use("*", async (c, next) => {
     } catch {
       c.set("session", null);
     }
-  } else if (c.req.path.startsWith("/v1/") || c.req.path.startsWith("/mcp/") || c.req.path === "/device") {
+  } else if (
+    c.req.path.startsWith("/v1/")
+    || c.req.path.startsWith("/mcp/")
+    || c.req.path.startsWith("/claude/plugins/")
+    || c.req.path.startsWith("/internal/byok/")
+    || c.req.path === "/device"
+  ) {
     c.set("session", null);
   } else {
     const session = await c.get("auth").api.getSession({ headers: c.req.raw.headers }).catch(() => null);
@@ -150,11 +165,16 @@ app.get("/device", (c) => {
 
 app.route("/v1", createGatewayRoutes());
 app.all("/mcp/:server", mcpGatewayHandler);
+app.route("/claude/plugins", createPluginMarketplaceRoutes());
 
 app.get("/user/bootstrap", (c) => bootstrapHandler(c));
 
 app.use("/admin/*", strictAdminOrigin, requireAdmin, blockImpersonated, withAuditContext);
 app.route("/admin", createAdminRoutes());
+app.route("/admin", createByokAdminRoutes());
+
+app.use("/internal/byok/*", requireByokInternalAuth);
+app.route("/internal/byok", createByokInternalRoutes());
 
 app.on(["POST", "GET"], "/api/auth/admin/*", async (c) => {
   const path = c.req.path.replace(/^\/api\/auth/, "");
@@ -243,7 +263,7 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => c.var.auth.handler(c.req.raw));
 app.get("/", (c) =>
   c.json({
     service: "vortex-auth-server",
-    ui: "https://auth.auth-dev.vortex.so",
+    ui: c.env.AUTH_WEB_ORIGIN,
     discovery: `${c.env.PUBLIC_ORIGIN}/.well-known/oauth-authorization-server`,
     bootstrap: `${c.env.PUBLIC_ORIGIN}/user/bootstrap`,
   }),

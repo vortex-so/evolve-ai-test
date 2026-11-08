@@ -133,7 +133,11 @@ export class D1Spy {
     const failed = statements.find(({ plan }) => plan?.error);
     if (failed?.plan?.error) throw failed.plan.error;
     for (const { sql, params } of statements) this.executions.push({ sql, params });
-    return items.map(() => ({ results: [], success: true, meta: d1Meta() })) as T[];
+    return statements.map(({ plan }) => ({
+      results: [],
+      success: true,
+      meta: d1Meta(plan?.run?.meta?.changes ?? 0),
+    })) as T[];
   }
 
   exec(_sql: string): Promise<{ count: number }> {
@@ -143,18 +147,51 @@ export class D1Spy {
 
 export class KVSpy {
   readonly deleted: string[] = [];
-  private readonly entries: Map<string, string>;
+  readonly reads: Array<{ key: string; type: string; withMetadata: boolean }> = [];
+  private readonly entries: Map<string, { bytes: Uint8Array; metadata: unknown }>;
 
-  constructor(entries: Record<string, string> = {}) {
-    this.entries = new Map(Object.entries(entries));
+  constructor(entries: Record<string, string | ArrayBuffer | { value: string | ArrayBuffer; metadata?: unknown }> = {}) {
+    this.entries = new Map(
+      Object.entries(entries).map(([key, entry]) => {
+        const value = typeof entry === "object" && entry !== null && "value" in entry
+          ? entry.value
+          : entry;
+        const metadata = typeof entry === "object" && entry !== null && "value" in entry
+          ? entry.metadata ?? null
+          : null;
+        return [key, { bytes: toBytes(value), metadata }];
+      }),
+    );
   }
 
-  async get(key: string) {
-    return this.entries.get(key) ?? null;
+  async get(key: string, type: "text" | "arrayBuffer" | "json" | "stream" = "text") {
+    this.reads.push({ key, type, withMetadata: false });
+    return this.readValue(key, type);
   }
 
-  async put(key: string, value: string) {
-    this.entries.set(key, value);
+  private readValue(key: string, type: "text" | "arrayBuffer" | "json" | "stream") {
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    if (type === "arrayBuffer") return entry.bytes.slice().buffer;
+    if (type === "stream") {
+      const bytes = entry.bytes.slice();
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      });
+    }
+    const text = new TextDecoder().decode(entry.bytes);
+    return type === "json" ? JSON.parse(text) : text;
+  }
+
+  async put(
+    key: string,
+    value: string | ArrayBuffer | ArrayBufferView,
+    options: { metadata?: unknown } = {},
+  ) {
+    this.entries.set(key, { bytes: toBytes(value), metadata: options.metadata ?? null });
   }
 
   async delete(key: string) {
@@ -166,8 +203,11 @@ export class KVSpy {
     return { keys: [], list_complete: true, cursor: "" };
   }
 
-  async getWithMetadata(key: string) {
-    return { value: this.entries.get(key) ?? null, metadata: null };
+  async getWithMetadata(key: string, type: "text" | "arrayBuffer" | "json" | "stream" = "text") {
+    this.reads.push({ key, type, withMetadata: true });
+    const entry = this.entries.get(key);
+    if (!entry) return { value: null, metadata: null };
+    return { value: this.readValue(key, type), metadata: entry.metadata };
   }
 
   async consume() {
@@ -175,18 +215,31 @@ export class KVSpy {
   }
 }
 
+function toBytes(value: string | ArrayBuffer | ArrayBufferView): Uint8Array {
+  if (typeof value === "string") return new TextEncoder().encode(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
+  }
+  return new Uint8Array(value.slice(0));
+}
+
 export function createTestEnv(
   plans: StatementPlan[] = [],
   kvEntries: Record<string, string> = {},
+  pluginKvEntries: Record<string, string | ArrayBuffer | { value: string | ArrayBuffer; metadata?: unknown }> = {},
+  existingPluginsKV?: KVSpy,
 ) {
   const DB = new D1Spy(plans);
   const KV = new KVSpy(kvEntries);
+  const PluginsKV = existingPluginsKV ?? new KVSpy(pluginKvEntries);
   return {
     DB,
     KV,
+    PluginsKV,
     env: {
       DB: DB as unknown as Env["DB"],
       AUTH_KV: KV as unknown as Env["AUTH_KV"],
+      PLUGINS_KV: PluginsKV as unknown as Env["PLUGINS_KV"],
       BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret",
       NODE_ENV: "test",
       PUBLIC_ORIGIN: TEST_PUBLIC_ORIGIN,
@@ -195,6 +248,9 @@ export function createTestEnv(
       LITELLM_ADMIN_KEY: "test-litellm-admin-key",
       LITELLM_MCP_ACCESS_GROUP: "vortex-claude-desktop",
       MCP_TOKEN_SECRET: "test-mcp-token-secret-test-mcp-token-secret",
+      ODOO_BASE_URL: "https://erp.vortex.so",
+      BYOK_ENCRYPTION_SECRET: "test-byok-encryption-secret-with-entropy",
+      BYOK_RUNTIME_TOKEN: "test-byok-runtime-token-with-entropy",
       AUTH_WEB_ORIGIN: "https://auth.auth-dev.vortex.so",
       POSTMARK_SERVER_TOKEN: "test-postmark-token",
       POSTMARK_FROM: "noreply@auth-dev.vortex.so",
@@ -237,9 +293,11 @@ export async function requestApp(
     headers?: HeadersInit;
     origin?: string | null;
     session?: TestSession | null;
-    plans?: StatementPlan[];
-    kvEntries?: Record<string, string>;
-    env?: Record<string, string>;
+      plans?: StatementPlan[];
+      kvEntries?: Record<string, string>;
+      pluginKvEntries?: Record<string, string | ArrayBuffer | { value: string | ArrayBuffer; metadata?: unknown }>;
+      pluginsKV?: KVSpy;
+      env?: Partial<Env>;
   } = {},
 ) {
   const currentAdminQuery =
@@ -261,7 +319,12 @@ export async function requestApp(
     });
   }
 
-  const { DB, KV, env: baseEnv } = createTestEnv(plans, options.kvEntries);
+  const { DB, KV, PluginsKV, env: baseEnv } = createTestEnv(
+    plans,
+    options.kvEntries,
+    options.pluginKvEntries,
+    options.pluginsKV,
+  );
   const env = { ...baseEnv, ...options.env };
   const headers = new Headers(options.headers ?? {});
   if (options.origin !== null) {
@@ -290,7 +353,7 @@ export async function requestApp(
     env,
   );
 
-  return { response, DB, KV };
+  return { response, DB, KV, PluginsKV };
 }
 
 export async function readJson(response: Response) {

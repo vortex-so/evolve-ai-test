@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 
 const AUTH_API_URL =
   process.env.NEXT_PUBLIC_AUTH_API_URL ?? "https://api.auth-dev.vortex.so";
-const CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
+const CONSOLE_ORIGIN =
+  process.env.NEXT_PUBLIC_CONSOLE_URL ?? "https://console.auth-dev.vortex.so";
 
 type AuthSessionPayload = {
   session?: Record<string, unknown> | null;
@@ -34,7 +35,9 @@ function normalizeSession(payload: AuthSessionPayload | null): Session | null {
 }
 
 function redirectToSignIn(currentUrl: string): never {
-  const url = new URL("https://auth.auth-dev.vortex.so/auth/sign-in");
+  const url = new URL(
+    `${process.env.NEXT_PUBLIC_AUTH_WEB_URL ?? "https://auth.auth-dev.vortex.so"}/auth/sign-in`,
+  );
   url.searchParams.set("redirect", currentUrl);
   redirect(url.toString());
 }

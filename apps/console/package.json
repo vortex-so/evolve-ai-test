@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "deploy:prod": "NEXT_PUBLIC_AUTH_API_URL=https://api.internal.vortex.so NEXT_PUBLIC_AUTH_WEB_URL=https://auth.internal.vortex.so NEXT_PUBLIC_CONSOLE_URL=https://console.internal.vortex.so opennextjs-cloudflare build && opennextjs-cloudflare deploy --config wrangler.prod.jsonc"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "^1.6.25",

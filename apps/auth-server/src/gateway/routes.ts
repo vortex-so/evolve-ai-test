@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { AdminApp } from "../lib/admin-guard";
+import { authenticateBearerSession } from "../lib/bearer-session";
 import { isEntitled } from "../lib/entitlement";
 import { getOrProvisionUserKey, invalidateUserKey } from "../lib/key-store";
 import { createLitellmClient } from "../lib/litellm";
@@ -22,22 +23,8 @@ function gatewayError(type: "authentication_error" | "permission_error", message
 
 type GatewayContext = Context<AdminApp>;
 
-async function authenticateGateway(c: GatewayContext) {
-  const authorization = c.req.header("authorization");
-  if (!authorization || !/^Bearer\s+\S+/i.test(authorization)) return null;
-
-  const testSession = c.req.header("x-test-session");
-  if (c.env.NODE_ENV === "test" && testSession) {
-    return c.get("session") ?? null;
-  }
-
-  return c.get("auth").api.getSession({
-    headers: new Headers({ authorization }),
-  }).catch(() => null);
-}
-
 async function gatewayHandler(c: GatewayContext) {
-  const session = await authenticateGateway(c);
+  const session = await authenticateBearerSession(c);
   if (!session) {
     return gatewayError("authentication_error", "A valid bearer token is required", 401);
   }

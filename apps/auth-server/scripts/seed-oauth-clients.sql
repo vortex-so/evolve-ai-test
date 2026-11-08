@@ -1,6 +1,6 @@
 -- Seed well-known OAuth clients that use this auth server.
 -- Apply against remote D1 via:
---   wrangler d1 execute evolve-ai-bootstrap-dev --remote --file=scripts/seed-oauth-clients.sql
+--   wrangler d1 execute evolve-ai-bootstrap-prod --remote --config=wrangler.prod.jsonc --file=scripts/seed-oauth-clients.sql
 --
 -- Idempotent: uses INSERT OR IGNORE. To reset, DELETE by clientId first.
 
@@ -18,6 +18,7 @@ INSERT OR IGNORE INTO "oauthClient" (
   "responseTypes",
   "tokenEndpointAuthMethod",
   "type",
+  "is_system",
   "createdAt",
   "updatedAt"
 ) VALUES (
@@ -33,6 +34,7 @@ INSERT OR IGNORE INTO "oauthClient" (
   'token',
   'none',
   'public',
+  1,
   datetime('now'),
   datetime('now')
 );

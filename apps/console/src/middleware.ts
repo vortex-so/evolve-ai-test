@@ -11,7 +11,9 @@ function hasSessionCookie(req: NextRequest): boolean {
 }
 
 function buildSignInRedirect(req: NextRequest): URL {
-  const url = new URL("https://auth.auth-dev.vortex.so/auth/sign-in");
+  const url = new URL(
+    `${process.env.NEXT_PUBLIC_AUTH_WEB_URL ?? "https://auth.auth-dev.vortex.so"}/auth/sign-in`,
+  );
   url.searchParams.set("redirect", req.nextUrl.href);
   return url;
 }

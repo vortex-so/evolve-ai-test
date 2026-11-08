@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vortex-console-prod",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "account_id": "672d1c1c2706c8738992bcd09704f6a4",
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "routes": [
+    { "pattern": "console.internal.vortex.so", "custom_domain": true }
+  ],
+  "vars": {
+    "NEXT_PUBLIC_AUTH_API_URL": "https://api.internal.vortex.so",
+    "NEXT_PUBLIC_AUTH_WEB_URL": "https://auth.internal.vortex.so",
+    "NEXT_PUBLIC_CONSOLE_URL": "https://console.internal.vortex.so"
+  }
+}

@@ -165,7 +165,8 @@ export function UsersTable({ initialUsers, initialSearch, initialError }: UsersT
     mutationFn: async (user: AdminUser) => {
       await mutateOrThrow(`/api/admin/users/${user.id}/impersonate`, { method: "POST" });
       toast.success(`Impersonating ${formatUserDisplayName(user)}.`);
-      window.location.href = "https://auth.auth-dev.vortex.so";
+      window.location.href =
+        process.env.NEXT_PUBLIC_AUTH_WEB_URL ?? "https://auth.auth-dev.vortex.so";
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
