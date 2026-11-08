@@ -452,5 +452,6 @@ describe("inference gateway", () => {
     expect(calls).toContain(`${LITELLM_BASE_URL}/key/generate`);
     expect(calls).toContain(`${LITELLM_BASE_URL}/v1/messages`);
     expect(DB.statements.some(({ sql }) => /INSERT INTO litellm_user_key/i.test(sql))).toBe(true);
+    expect(DB.statements.some(({ sql }) => /litellm_user_mcp_key/i.test(sql))).toBe(false);
   });
 });

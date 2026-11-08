@@ -232,6 +232,82 @@ bootstrap configuration every 10 minutes by default, controlled by
 `configRecheckIntervalMinutes`. After a confirmed change, it enforces relaunch
 after `relaunchEnforcementHours`, which defaults to 24 hours.
 
+## Distributing MCP tools
+
+Grant MCP servers per bootstrap profile with `managedMcpServers`. For a server
+hosted behind the Vortex LiteLLM gateway, use the auth-server MCP URL and do not
+write an `Authorization` header into the stored profile:
+
+```json
+{
+  "$schemaVersion": 1,
+  "inferenceProvider": "gateway",
+  "managedMcpServers": [
+    {
+      "name": "meta-ads",
+      "transport": "http",
+      "url": "https://api.auth-dev.vortex.so/mcp/meta_ads_mcp"
+    }
+  ]
+}
+```
+
+The bootstrap server injects a stable, per-user MCP bearer token into the
+entry's static `headers.Authorization` field. Static MCP headers are not
+consent-gated, but Claude Desktop applies header changes only after an app
+relaunch. The token is deterministic for the user and token version, so normal
+session refreshes do not change the profile or its ETag.
+
+Servers that provide their own OAuth flow stay direct and are not modified by
+the gateway injection:
+
+```json
+{
+  "name": "posthog",
+  "transport": "http",
+  "url": "https://posthog.vortex.so/mcp",
+  "oauth": true
+}
+```
+
+Add only the MCP entries a profile's users may access. The gateway resolves the
+assigned profile strictly, or the default profile only for an active admin, and
+requires the raw URL to be the exact canonical
+`https://api.auth-dev.vortex.so/mcp/<server>` form. Removing an entry from the
+profile prevents new gateway requests even if a device still has the old static
+header.
+
+Set these MCP-specific Worker values:
+
+| Variable | Purpose |
+| --- | --- |
+| `LITELLM_MCP_ACCESS_GROUP` | LiteLLM MCP access group granted to newly generated per-user virtual keys; use `vortex-claude-desktop` |
+| `MCP_TOKEN_SECRET` | Worker secret used only for MCP HMAC bearer tokens; must be at least 32 random characters |
+
+The MCP gateway returns `503` and bootstrap omits token injection when
+`MCP_TOKEN_SECRET` is missing or shorter than 32 characters. It never falls
+back to `BETTER_AUTH_SECRET`.
+
+Inference and MCP use purpose-separated LiteLLM virtual keys. The inference key
+has no MCP object permissions. The MCP key is provisioned automatically on the
+user's first MCP request, receives `LITELLM_MCP_ACCESS_GROUP`, and is denied
+default model access so it cannot be used as an inference credential.
+
+Apply D1 migrations `0007_mcp_token_version.sql` and
+`0008_litellm_mcp_key.sql` before enabling the gateway.
+
+To revoke a user's distributed MCP token, send an authenticated,
+non-impersonated admin request from the strict console origin:
+
+```text
+POST /admin/users/<user-id>/mcp-token/rotate
+Origin: https://console.auth-dev.vortex.so
+```
+
+The route increments the user's token version and writes audit action
+`admin.mcp_token.rotate`. Existing tokens fail immediately; relaunch Claude
+Desktop after the next bootstrap refresh so it loads the newly injected token.
+
 ## Operating the service
 
 ### Configuration
@@ -243,6 +319,7 @@ Set non-secret Worker values in `apps/auth-server/wrangler.jsonc`:
 | `PUBLIC_ORIGIN` | `https://api.auth-dev.vortex.so` |
 | `INFERENCE_GATEWAY_BASE_URL` | API origin without `/v1` |
 | `LITELLM_BASE_URL` | `https://llm-manager.fly.dev` |
+| `LITELLM_MCP_ACCESS_GROUP` | `vortex-claude-desktop` |
 | `AUTH_WEB_ORIGIN` | `https://auth.auth-dev.vortex.so` |
 
 Set these as Worker secrets:
@@ -251,6 +328,7 @@ Set these as Worker secrets:
 | --- | --- |
 | `BETTER_AUTH_SECRET` | Better Auth signing secret (must be non-empty, 32+ random characters) |
 | `LITELLM_KEY_ENCRYPTION_SECRET` | Input key material for encrypting stored per-user LiteLLM keys (32+ random characters) |
+| `MCP_TOKEN_SECRET` | HMAC secret for stable per-user MCP gateway tokens (32+ random characters; no fallback) |
 | `LITELLM_ADMIN_KEY` | LiteLLM proxy-admin key (can create users and keys) |
 | `POSTMARK_*` | Postmark credentials and sender settings used by the auth flow |
 

@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS mcp_token_version (
+  user_id TEXT PRIMARY KEY NOT NULL,
+  version INTEGER NOT NULL,
+  rotated_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+);

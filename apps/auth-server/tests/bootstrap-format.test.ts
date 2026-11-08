@@ -131,10 +131,10 @@ describe("bootstrap flat v1 response format", () => {
     expect(second.response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("returns 304 for If-None-Match: *", async () => {
+  it("intentionally returns 200 for If-None-Match: * so rotated credentials are delivered", async () => {
     const { response } = await requestFallback({ "If-None-Match": "*" });
 
-    expect(response.status).toBe(304);
+    expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 

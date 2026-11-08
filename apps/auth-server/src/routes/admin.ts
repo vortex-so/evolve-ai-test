@@ -1,7 +1,12 @@
 import { Hono, type Context } from "hono";
 import { validateBootstrapConfig } from "../bootstrap/config-schema";
 import type { AdminApp } from "../lib/admin-guard";
-import { logAuditWriteFailure, writeAudit, type AuditWriteInput } from "../lib/audit";
+import {
+  logAuditWriteFailure,
+  prepareAuditStatement,
+  writeAudit,
+  type AuditWriteInput,
+} from "../lib/audit";
 import { detectGuardFailure } from "../lib/admin-invariants";
 
 type DeviceRow = {
@@ -616,6 +621,33 @@ export function createAdminRoutes() {
     });
     if (auditFailure) {
       return auditFailure;
+    }
+    return c.json({ success: true });
+  });
+
+  admin.post("/users/:id/mcp-token/rotate", async (c) => {
+    const userId = c.req.param("id");
+    const rotatedAt = Date.now();
+    const rotateStatement = c.env.DB.prepare(
+      `INSERT INTO mcp_token_version (user_id, version, rotated_at)
+       VALUES (?, 2, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         version = mcp_token_version.version + 1,
+         rotated_at = excluded.rotated_at`,
+    )
+      .bind(userId, rotatedAt);
+    const auditStatement = prepareAuditStatement(c.env.DB, c.var.auditContext, {
+      action: "admin.mcp_token.rotate",
+      target_type: "user",
+      target_id: userId,
+      outcome: "success",
+      status_code: 200,
+    });
+    if (!auditStatement) return jsonError("audit_write_failed", 500);
+    try {
+      await c.env.DB.batch([rotateStatement, auditStatement]);
+    } catch {
+      return jsonError("audit_write_failed", 500);
     }
     return c.json({ success: true });
   });

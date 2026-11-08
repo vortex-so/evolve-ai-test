@@ -5,9 +5,12 @@ export type KeyStoreDeps = {
   db: D1Database;
   litellm: LitellmClient;
   secret: string;
+  mcpAccessGroup?: string;
   now?: () => number;
   nonce?: () => string;
 };
+
+export type KeyPurpose = "inference" | "mcp";
 
 type StoredKeyRow = {
   key_ciphertext: string;
@@ -24,10 +27,26 @@ const metadata = (userId: string) => ({
   vortex_user_id: userId,
 });
 
-async function readStoredKey(db: D1Database, userId: string): Promise<StoredKeyRow | null> {
+function tableFor(purpose: KeyPurpose): "litellm_user_key" | "litellm_user_mcp_key" {
+  return purpose === "mcp" ? "litellm_user_mcp_key" : "litellm_user_key";
+}
+
+function aliasPrefixFor(purpose: KeyPurpose): "vortex-sso:" | "vortex-sso-mcp:" {
+  return purpose === "mcp" ? "vortex-sso-mcp:" : "vortex-sso:";
+}
+
+function aadFor(purpose: KeyPurpose, userId: string): string {
+  return purpose === "mcp" ? `mcp:${userId}` : userId;
+}
+
+async function readStoredKey(
+  db: D1Database,
+  userId: string,
+  purpose: KeyPurpose,
+): Promise<StoredKeyRow | null> {
   return db
     .prepare(
-      "SELECT key_ciphertext, key_iv, key_alias FROM litellm_user_key WHERE user_id = ?",
+      `SELECT key_ciphertext, key_iv, key_alias FROM ${tableFor(purpose)} WHERE user_id = ?`,
     )
     .bind(userId)
     .first<StoredKeyRow>();
@@ -48,11 +67,12 @@ async function deleteKeyAliasBestEffort(
 export async function getOrProvisionUserKey(
   deps: KeyStoreDeps,
   user: { id: string; email: string },
+  purpose: KeyPurpose,
 ): Promise<string> {
-  const stored = await readStoredKey(deps.db, user.id);
+  const stored = await readStoredKey(deps.db, user.id, purpose);
   if (stored) {
     try {
-      return await decryptSecret(deps.secret, user.id, {
+      return await decryptSecret(deps.secret, aadFor(purpose, user.id), {
         ciphertext: stored.key_ciphertext,
         iv: stored.key_iv,
       });
@@ -60,7 +80,7 @@ export async function getOrProvisionUserKey(
       console.warn("Stored LiteLLM key could not be decrypted; re-provisioning", {
         userId: user.id,
       });
-      await invalidateUserKey(deps, user.id);
+      await invalidateUserKey(deps, user.id, purpose);
     }
   }
 
@@ -85,19 +105,21 @@ export async function getOrProvisionUserKey(
   }
 
   const nonce = deps.nonce ?? (() => crypto.randomUUID().slice(0, 8));
-  const alias = `vortex-sso:${user.id}:${nonce()}`;
+  const alias = `${aliasPrefixFor(purpose)}${user.id}:${nonce()}`;
   const generated = await deps.litellm.generateKey({
     userId: litellmUserId,
     keyAlias: alias,
     metadata: metadata(user.id),
+    purpose,
+    ...(purpose === "mcp" ? { mcpAccessGroup: deps.mcpAccessGroup } : {}),
   });
   let insertResult: D1Result;
   try {
-    const sealed = await encryptSecret(deps.secret, user.id, generated.key);
+    const sealed = await encryptSecret(deps.secret, aadFor(purpose, user.id), generated.key);
     const timestamp = (deps.now ?? Date.now)();
     insertResult = await deps.db
       .prepare(
-        `INSERT INTO litellm_user_key (
+        `INSERT INTO ${tableFor(purpose)} (
           user_id, litellm_user_id, key_alias, token_id, key_ciphertext, key_iv,
           key_wrap_version, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -123,28 +145,33 @@ export async function getOrProvisionUserKey(
   if (insertResult.meta.changes !== 0) return generated.key;
 
   await deleteKeyAliasBestEffort(deps.litellm, alias, user.id);
-  const winner = await readStoredKey(deps.db, user.id);
+  const winner = await readStoredKey(deps.db, user.id, purpose);
   if (!winner) {
     throw new Error("LiteLLM key insert lost a race but no stored winner was found");
   }
-  return decryptSecret(deps.secret, user.id, {
+  return decryptSecret(deps.secret, aadFor(purpose, user.id), {
     ciphertext: winner.key_ciphertext,
     iv: winner.key_iv,
   });
 }
 
-export async function invalidateUserKey(deps: KeyStoreDeps, userId: string): Promise<void> {
-  const alias = await getStoredKeyAlias(deps.db, userId);
-  await deps.db.prepare("DELETE FROM litellm_user_key WHERE user_id = ?").bind(userId).run();
+export async function invalidateUserKey(
+  deps: KeyStoreDeps,
+  userId: string,
+  purpose: KeyPurpose,
+): Promise<void> {
+  const alias = await getStoredKeyAlias(deps.db, userId, purpose);
+  await deps.db.prepare(`DELETE FROM ${tableFor(purpose)} WHERE user_id = ?`).bind(userId).run();
   if (alias) await deleteKeyAliasBestEffort(deps.litellm, alias, userId);
 }
 
 export async function getStoredKeyAlias(
   db: D1Database,
   userId: string,
+  purpose: KeyPurpose,
 ): Promise<string | null> {
   const row = await db
-    .prepare("SELECT key_alias FROM litellm_user_key WHERE user_id = ?")
+    .prepare(`SELECT key_alias FROM ${tableFor(purpose)} WHERE user_id = ?`)
     .bind(userId)
     .first<StoredAliasRow>();
   return row?.key_alias ?? null;

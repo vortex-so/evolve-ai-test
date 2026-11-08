@@ -79,11 +79,17 @@ export async function writeAudit(
   ctx: AuditContext | null | undefined,
   input: AuditWriteInput,
 ): Promise<void> {
-  if (!ctx) {
-    return;
-  }
+  const statement = prepareAuditStatement(env.DB, ctx, input);
+  if (statement) await statement.run();
+}
 
-  await env.DB.prepare(
+export function prepareAuditStatement(
+  db: D1Database,
+  ctx: AuditContext | null | undefined,
+  input: AuditWriteInput,
+): D1PreparedStatement | null {
+  if (!ctx) return null;
+  return db.prepare(
     `INSERT INTO audit_log (
       id,
       created_at,
@@ -102,8 +108,7 @@ export async function writeAudit(
       ip,
       user_agent
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
+  ).bind(
       crypto.randomUUID(),
       Date.now(),
       ctx.request_id,
@@ -120,6 +125,5 @@ export async function writeAudit(
       stringifyOrNull(input.metadata),
       ctx.ip,
       ctx.user_agent,
-    )
-    .run();
+    );
 }

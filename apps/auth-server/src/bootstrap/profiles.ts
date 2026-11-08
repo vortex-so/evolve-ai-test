@@ -1,10 +1,19 @@
 import type { BootstrapConfig } from "@vortex/schema";
 import { validateBootstrapConfig } from "./config-schema";
+import {
+  getMcpTokenVersion,
+  hasValidMcpTokenSecret,
+  mintMcpToken,
+} from "../lib/mcp-token";
+import { getActiveAdminStatus } from "../lib/entitlement";
+import { parseGatewayMcpUrl } from "../lib/mcp-url";
 
 export type { BootstrapConfig };
 
 type ProfileContext = {
   gatewayBaseUrl: string;
+  publicOrigin?: string;
+  mcpTokenSecret?: string;
   user: {
     id: string;
     email: string;
@@ -39,24 +48,84 @@ function baseConfig({ gatewayBaseUrl, user }: ProfileContext): BootstrapConfig {
   };
 }
 
-function mergeDynamicFields(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function injectMcpAuthorization(
+  db: D1Database,
   config: BootstrapConfig,
   ctx: ProfileContext,
-): BootstrapConfig {
+): Promise<BootstrapConfig> {
+  if (!ctx.publicOrigin) return config;
+  const servers: unknown = config.managedMcpServers;
+  if (!Array.isArray(servers)) return config;
+
+  const hasGatewayServer = servers.some(
+    (entry) =>
+      isRecord(entry) &&
+      typeof entry.url === "string" &&
+      parseGatewayMcpUrl(ctx.publicOrigin!, entry.url) !== null,
+  );
+  if (!hasGatewayServer) {
+    return config;
+  }
+
+  let authorization: string | null = null;
+  if (hasValidMcpTokenSecret(ctx.mcpTokenSecret)) {
+    const version = await getMcpTokenVersion(db, ctx.user.id);
+    authorization = `Bearer ${await mintMcpToken(ctx.mcpTokenSecret, ctx.user.id, version)}`;
+  }
+  const managedMcpServers = servers.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.url !== "string" ||
+      parseGatewayMcpUrl(ctx.publicOrigin!, entry.url) === null
+    ) {
+      return entry;
+    }
+    const existingHeaders = isRecord(entry.headers)
+      ? Object.fromEntries(
+          Object.entries(entry.headers).filter(
+            ([name]) => name.toLowerCase() !== "authorization",
+          ),
+        )
+      : {};
+    const headers = authorization
+      ? { ...existingHeaders, Authorization: authorization }
+      : existingHeaders;
+    const updated = { ...entry };
+    if (Object.keys(headers).length > 0) updated.headers = headers;
+    else delete updated.headers;
+    return updated;
+  });
+
+  return { ...config, managedMcpServers };
+}
+
+async function mergeDynamicFields(
+  db: D1Database,
+  config: BootstrapConfig,
+  ctx: ProfileContext,
+): Promise<BootstrapConfig> {
   const base = baseConfig(ctx);
   const servedConfig = { ...config };
   delete servedConfig.$schema;
 
-  return {
-    ...servedConfig,
-    $schemaVersion: 1,
-    inferenceGatewayBaseUrl: base.inferenceGatewayBaseUrl,
-    expiresAt: base.expiresAt,
-    otlpResourceAttributes: {
-      ...(config.otlpResourceAttributes ?? {}),
-      ...(base.otlpResourceAttributes ?? {}),
+  return injectMcpAuthorization(
+    db,
+    {
+      ...servedConfig,
+      $schemaVersion: 1,
+      inferenceGatewayBaseUrl: base.inferenceGatewayBaseUrl,
+      expiresAt: base.expiresAt,
+      otlpResourceAttributes: {
+        ...(config.otlpResourceAttributes ?? {}),
+        ...(base.otlpResourceAttributes ?? {}),
+      },
     },
-  };
+    ctx,
+  );
 }
 
 export function selectProfile(ctx: ProfileContext): BootstrapConfig {
@@ -128,7 +197,7 @@ export async function resolveUserProfile(
     if (parsed && typeof parsed === "object" && Object.keys(parsed as Record<string, unknown>).length > 0) {
       const validation = validateBootstrapConfig(parsed);
       if (validation.ok) {
-        return mergeDynamicFields(validation.data, ctx);
+        return mergeDynamicFields(db, validation.data, ctx);
       }
     }
   }
@@ -140,4 +209,41 @@ export async function resolveUserProfile(
       roles: resolveFallbackRoles(userId),
     },
   });
+}
+
+export async function resolveUserProfileStrict(
+  db: D1Database,
+  ctx: ProfileContext,
+): Promise<BootstrapConfig | null> {
+  const assigned = await db
+    .prepare(
+      `SELECT profile_id
+       FROM bootstrap_user_profile
+       WHERE user_id = ?`,
+    )
+    .bind(ctx.user.id)
+    .first<{ profile_id: string }>();
+
+  let selected: { config: string; schema_version: number } | null;
+  if (assigned?.profile_id) {
+    selected = await db
+      .prepare("SELECT config, schema_version FROM bootstrap_profile WHERE id = ?")
+      .bind(assigned.profile_id)
+      .first<{ config: string; schema_version: number }>();
+  } else {
+    if (!(await getActiveAdminStatus(db, ctx.user.id))) return null;
+    selected = await db
+      .prepare("SELECT config, schema_version FROM bootstrap_profile WHERE is_default = 1")
+      .first<{ config: string; schema_version: number }>();
+  }
+
+  if (!selected?.config) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(selected.config) as unknown;
+  } catch {
+    return null;
+  }
+  const validation = validateBootstrapConfig(parsed);
+  return validation.ok ? validation.data : null;
 }
