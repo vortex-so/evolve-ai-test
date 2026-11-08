@@ -63,4 +63,62 @@ describe("admin route contract", () => {
       expect.objectContaining({ body: { sessionToken: "session-token" } }),
     );
   });
+
+  it("proxies Odoo BYOK reads and writes to the auth-server admin path", async () => {
+    const mod = await import("../src/app/api/admin/users/[id]/byok/odoo/route");
+    const request = new Request("https://console.test/api/admin/users/user-1/byok/odoo", {
+      method: "PUT",
+      body: JSON.stringify({ version: 0, database: "db", login: "user@example.com", enabled: true, policy: {} }),
+      headers: { "content-type": "application/json" },
+    });
+
+    await mod.PUT(request, await routeContext({ id: "user-1" }));
+
+    expect(proxyJsonToAuthServer).toHaveBeenCalledWith(
+      "/admin/users/user-1/byok/odoo",
+      expect.objectContaining({ method: "PUT", body: expect.anything() }),
+    );
+  });
+
+  it("proxies Odoo connection tests through the BFF and retires approval decisions", async () => {
+    const testRoute = await import("../src/app/api/admin/users/[id]/byok/odoo/test/route");
+    await testRoute.POST(
+      new Request("https://console.test/api/admin/users/user-1/byok/odoo/test", {
+        method: "POST",
+        body: JSON.stringify({ version: 1 }),
+      }),
+      await routeContext({ id: "user-1" }),
+    );
+    expect(proxyJsonToAuthServer).toHaveBeenCalledWith(
+      "/admin/users/user-1/byok/odoo/test",
+      expect.objectContaining({ body: { version: 1 } }),
+    );
+
+    const approvalRoute = await import("../src/app/api/admin/byok/approvals/[id]/route");
+    const response = await approvalRoute.POST(
+      new Request("https://console.test/api/admin/byok/approvals/approval-1", {
+        method: "POST",
+        body: JSON.stringify({ decision: "approve" }),
+      }),
+      await routeContext({ id: "approval-1" }),
+    );
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual(expect.objectContaining({ error: "custom_approval_retired" }));
+    expect(proxyJsonToAuthServer).not.toHaveBeenCalledWith(
+      "/admin/byok/approvals/approval-1",
+      expect.anything(),
+    );
+  });
+
+  it("retires approval reads after the admin guard", async () => {
+    const approvalRoute = await import("../src/app/api/admin/byok/approvals/route");
+    const response = await approvalRoute.GET(
+      new Request("https://console.test/api/admin/byok/approvals?limit=100"),
+    );
+
+    expect(requireAdminSession).toHaveBeenCalled();
+    expect(response.status).toBe(410);
+    expect(await response.json()).toEqual(expect.objectContaining({ error: "custom_approval_retired" }));
+    expect(proxyRequestToAuthServer).not.toHaveBeenCalled();
+  });
 });
