@@ -1,7 +1,8 @@
 const AUTH_API_URL =
   process.env.NEXT_PUBLIC_AUTH_API_URL ?? "https://api.auth-dev.vortex.so";
 
-const CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
+const CONSOLE_ORIGIN =
+  process.env.NEXT_PUBLIC_CONSOLE_URL ?? "https://console.auth-dev.vortex.so";
 const LOCAL_CONSOLE_ORIGIN = "http://localhost:3001";
 
 type AuthSessionPayload = {

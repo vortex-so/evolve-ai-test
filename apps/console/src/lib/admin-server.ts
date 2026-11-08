@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 
-export const CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
+export const CONSOLE_ORIGIN =
+  process.env.NEXT_PUBLIC_CONSOLE_URL ?? "https://console.auth-dev.vortex.so";
 
 export function getRequestOrigin(headerStore: Headers): string {
   const proto = headerStore.get("x-forwarded-proto") ?? "https";

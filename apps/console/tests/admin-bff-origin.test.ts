@@ -100,4 +100,33 @@ describe("requireAdminSession origin / referer policy", () => {
     expect(result.status).toBe(403);
     expect(await result.json()).toEqual({ error: "origin_mismatch" });
   });
+
+  it("uses the production console origin without trusting a lookalike", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_AUTH_API_URL", "https://api.internal.vortex.so");
+    vi.stubEnv("NEXT_PUBLIC_CONSOLE_URL", "https://console.internal.vortex.so");
+    mockSessionOk();
+    const requireAdminSession = await loadRequireAdminSession();
+
+    const accepted = await requireAdminSession(
+      new Request("https://console.internal.vortex.so/api/admin/sessions", {
+        headers: {
+          cookie: "session=admin",
+          origin: "https://console.internal.vortex.so",
+        },
+      }),
+    );
+    expect(accepted).not.toBeInstanceOf(Response);
+
+    const rejected = (await requireAdminSession(
+      new Request("https://console.internal.vortex.so/api/admin/sessions", {
+        headers: {
+          cookie: "session=admin",
+          origin: "https://console.internal.vortex.so.evil.example",
+        },
+      }),
+    )) as Response;
+    expect(rejected.status).toBe(403);
+    expect(await rejected.json()).toEqual({ error: "origin_mismatch" });
+  });
 });
