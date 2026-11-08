@@ -133,7 +133,11 @@ export class D1Spy {
     const failed = statements.find(({ plan }) => plan?.error);
     if (failed?.plan?.error) throw failed.plan.error;
     for (const { sql, params } of statements) this.executions.push({ sql, params });
-    return items.map(() => ({ results: [], success: true, meta: d1Meta() })) as T[];
+    return statements.map(({ plan }) => ({
+      results: [],
+      success: true,
+      meta: d1Meta(plan?.run?.meta?.changes ?? 0),
+    })) as T[];
   }
 
   exec(_sql: string): Promise<{ count: number }> {
@@ -244,6 +248,9 @@ export function createTestEnv(
       LITELLM_ADMIN_KEY: "test-litellm-admin-key",
       LITELLM_MCP_ACCESS_GROUP: "vortex-claude-desktop",
       MCP_TOKEN_SECRET: "test-mcp-token-secret-test-mcp-token-secret",
+      ODOO_BASE_URL: "https://erp.vortex.so",
+      BYOK_ENCRYPTION_SECRET: "test-byok-encryption-secret-with-entropy",
+      BYOK_RUNTIME_TOKEN: "test-byok-runtime-token-with-entropy",
       AUTH_WEB_ORIGIN: "https://auth.auth-dev.vortex.so",
       POSTMARK_SERVER_TOKEN: "test-postmark-token",
       POSTMARK_FROM: "noreply@auth-dev.vortex.so",

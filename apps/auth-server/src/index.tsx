@@ -24,6 +24,9 @@ import { createRefreshTokenService } from "./lib/refresh-token";
 import { createOAuthTokenHandler } from "./oauth/token";
 import { getStoredKeyAlias } from "./lib/key-store";
 import { createLitellmClient } from "./lib/litellm";
+import { createByokAdminRoutes } from "./byok/admin-routes";
+import { createByokInternalRoutes } from "./byok/internal-routes";
+import { requireByokInternalAuth } from "./byok/internal-auth";
 
 const app = new Hono<AdminApp>();
 
@@ -101,6 +104,7 @@ app.use("*", async (c, next) => {
     c.req.path.startsWith("/v1/")
     || c.req.path.startsWith("/mcp/")
     || c.req.path.startsWith("/claude/plugins/")
+    || c.req.path.startsWith("/internal/byok/")
     || c.req.path === "/device"
   ) {
     c.set("session", null);
@@ -162,6 +166,10 @@ app.get("/user/bootstrap", (c) => bootstrapHandler(c));
 
 app.use("/admin/*", strictAdminOrigin, requireAdmin, blockImpersonated, withAuditContext);
 app.route("/admin", createAdminRoutes());
+app.route("/admin", createByokAdminRoutes());
+
+app.use("/internal/byok/*", requireByokInternalAuth);
+app.route("/internal/byok", createByokInternalRoutes());
 
 app.on(["POST", "GET"], "/api/auth/admin/*", async (c) => {
   const path = c.req.path.replace(/^\/api\/auth/, "");

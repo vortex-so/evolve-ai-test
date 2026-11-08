@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import type { Auth, Env } from "../auth";
 import { getActiveAdminStatus } from "./entitlement";
+import type { ByokAssertion } from "../byok/identity";
 
 export const ADMIN_CONSOLE_ORIGIN = "https://console.auth-dev.vortex.so";
 export const ADMIN_CONSOLE_LOCAL_ORIGIN = "http://localhost:3001";
@@ -24,6 +25,7 @@ export type AdminApp = {
     session?: AdminSession | null;
     adminSession?: AdminSession;
     auditContext?: AuditContext;
+    byokAssertion?: ByokAssertion;
   };
 };
 

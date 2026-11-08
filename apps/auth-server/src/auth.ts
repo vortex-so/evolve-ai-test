@@ -22,6 +22,14 @@ export type Env = {
   /** AES key-wrap secret for stored per-user LiteLLM keys; falls back to BETTER_AUTH_SECRET. */
   LITELLM_KEY_ENCRYPTION_SECRET?: string;
   MCP_TOKEN_SECRET?: string;
+  ODOO_BASE_URL?: string;
+  ODOO_MCP_ALIAS?: string;
+  ODOO_TEST_MCP_ALIAS?: string;
+  BYOK_ENCRYPTION_SECRET?: string;
+  BYOK_RUNTIME_TOKEN?: string;
+  BYOK_ASSERTION_PRIVATE_KEY?: string;
+  BYOK_ASSERTION_PUBLIC_KEY?: string;
+  BYOK_TEST_LITELLM_KEY?: string;
   MARKETPLACE_PUBLISH_TOKEN?: string;
   AUTH_WEB_ORIGIN: string;
   POSTMARK_SERVER_TOKEN: string;
